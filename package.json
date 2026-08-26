@@ -1,0 +1,13 @@
+{
+  "name": "snake-nn",
+  "private": true,
+  "type": "module",
+  "description": "Snake game with an evolutionary neural-network training mode. Vanilla JS + inline SVG, no dependencies.",
+  "scripts": {
+    "test": "node tests/neuralNetwork.test.js && node tests/snakeSimulation.test.js && node tests/evolutionEngine.test.js",
+    "serve": "python3 -m http.server 8000"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.9.0"
+  }
+}

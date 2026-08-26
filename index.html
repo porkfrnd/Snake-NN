@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Snake — Play &amp; Neural Training</title>
+<meta name="description" content="A plain Snake game with a built-in evolutionary neural-network training mode. Vanilla JS, inline SVG, no dependencies.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2322c55e'/%3E%3Ccircle cx='23' cy='9' r='4' fill='%23dc2626'/%3E%3Cpath d='M6 22c0-4 4-4 6-6s2-4 6-4' stroke='%2315803d' stroke-width='3.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/game.css">
+<link rel="stylesheet" href="css/training.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <h1>Snake</h1>
+    <nav class="tabs" aria-label="Mode">
+      <button class="tab active" id="tabPlay" aria-pressed="true">Play</button>
+      <button class="tab" id="tabTrain" aria-pressed="false">Train</button>
+    </nav>
+  </header>
+
+  <!-- ============================== PLAY ============================== -->
+  <section id="playScreen" aria-label="Play mode">
+    <div class="scorebar">
+      <span class="item">Score<b id="hudScore">0</b></span>
+      <span class="item">Best<b id="hudBest">0</b></span>
+      <span class="item">Level<b id="hudLevel">1</b></span>
+      <span class="speed" role="img" aria-label="Speed"><i id="hudSpeed"></i></span>
+    </div>
+
+    <div class="replay-chip" id="replayChip" hidden>
+      <span>AI replay — <b id="replayMeta"></b></span>
+      <button id="replayStopBtn" type="button">Stop replay</button>
+    </div>
+
+    <div class="boardwrap" id="boardWrap">
+      <svg id="gameBoard" viewBox="0 0 600 600" role="img" aria-label="Snake board">
+        <rect width="600" height="600" fill="#ffffff"/>
+        <g id="gridLayer"></g>
+        <g id="foodLayer"></g>
+        <g id="snakeLayer"></g>
+        <g id="fxLayer" pointer-events="none"></g>
+      </svg>
+
+      <div class="overlay open" id="menuOverlay" role="dialog" aria-modal="true" aria-label="Start menu">
+        <div class="panel">
+          <h2>Snake</h2>
+          <p>Arrow keys / WASD to move &middot; P pauses &middot; Space starts.<br>
+             On touch devices use the pad below or swipe the board.</p>
+          <div class="row">
+            <button class="primary" id="menuPlayBtn">Play</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="countOverlay" role="status" aria-live="polite">
+        <div id="countNum">3</div>
+      </div>
+
+      <div class="overlay" id="pauseOverlay" role="dialog" aria-modal="true" aria-label="Paused">
+        <div class="panel">
+          <h2>Paused</h2>
+          <p>P or the button below resumes.</p>
+          <div class="row">
+            <button class="primary" id="pauseResumeBtn">Resume</button>
+            <button id="pauseRestartBtn">Restart</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay" id="overOverlay" role="dialog" aria-modal="true" aria-label="Game over">
+        <div class="panel">
+          <span class="badge-new" id="overNew" hidden>New best</span>
+          <h2 id="overTitle">Game over</h2>
+          <p id="overMsg">The snake hit something solid.</p>
+          <div class="stats">
+            <div>Score<b id="overScore">0</b></div>
+            <div>Best<b id="overBest">0</b></div>
+            <div>Level<b id="overLevel">1</b></div>
+            <div>Apples<b id="overFoods">0</b></div>
+          </div>
+          <div class="row">
+            <button class="primary" id="overRestartBtn">Play again</button>
+            <button id="overMenuBtn">Menu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="playbtns">
+      <button id="pauseBtn">Pause</button>
+      <button id="restartBtn">Restart</button>
+    </div>
+
+    <div class="dpad" id="dpad" aria-label="Touch controls">
+      <button class="u" data-dir="up" aria-label="Up">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6l-6 7h12z" fill="currentColor"/></svg>
+      </button>
+      <button class="l" data-dir="left" aria-label="Left">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12l7-6v12z" fill="currentColor"/></svg>
+      </button>
+      <span class="c" aria-hidden="true"></span>
+      <button class="r" data-dir="right" aria-label="Right">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 12l-7 6V6z" fill="currentColor"/></svg>
+      </button>
+      <button class="d" data-dir="down" aria-label="Down">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18l-6-7h12z" fill="currentColor"/></svg>
+      </button>
+    </div>
+
+    <details class="settings">
+      <summary>Settings</summary>
+      <div class="rows">
+        <div class="row">
+          <div><b>Wall wrap</b><small>Snake exits one side and enters the other</small></div>
+          <button class="switch" id="wrapToggle" role="switch" aria-checked="false" aria-label="Wall wrap"><span class="knob"></span></button>
+        </div>
+        <div class="row">
+          <div><b>Sound</b><small>Synthesized beeps, no audio files</small></div>
+          <button class="switch" id="soundToggle" role="switch" aria-checked="true" aria-label="Sound"><span class="knob"></span></button>
+        </div>
+        <div class="row">
+          <div><b>Haptics</b><small>Vibration on eat and crash, where supported</small></div>
+          <button class="switch" id="hapticsToggle" role="switch" aria-checked="true" aria-label="Haptics"><span class="knob"></span></button>
+        </div>
+        <div class="row">
+          <div><b>Reduced motion</b><small>Disables decorative animation</small></div>
+          <button class="switch" id="motionToggle" role="switch" aria-checked="false" aria-label="Reduced motion"><span class="knob"></span></button>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ============================== TRAIN ============================== -->
+  <section id="trainScreen" hidden aria-label="Training mode">
+    <div class="toolbar">
+      <span class="group">
+        <button class="primary" id="trainStart">Start</button>
+        <button id="trainPause" disabled>Pause</button>
+        <button id="trainResume" disabled>Resume</button>
+        <button id="trainStop" disabled>Stop</button>
+      </span>
+      <span class="group">
+        <button id="trainReset">Reset training</button>
+      </span>
+      <span class="group">
+        <button id="trainSave">Save</button>
+        <button id="trainLoad">Load</button>
+        <button id="trainExport">Export</button>
+        <button id="trainImport">Import</button>
+      </span>
+      <span class="group">
+        <button id="trainWatch" disabled>Watch champion</button>
+      </span>
+    </div>
+
+    <div class="stats">
+      <div class="cell"><label>Generation</label><b id="statGeneration">0</b></div>
+      <div class="cell"><label>Population</label><b id="statPopulation">—</b></div>
+      <div class="cell"><label>Best fitness</label><b id="statBest">—</b></div>
+      <div class="cell"><label>Avg fitness</label><b id="statAvg">—</b></div>
+      <div class="cell"><label>Best apples</label><b id="statBestScore">0</b></div>
+      <div class="cell"><label>Games / sec</label><b id="statGamesSec">—</b></div>
+      <div class="cell"><label>Steps / sec</label><b id="statStepsSec">—</b></div>
+      <div class="cell"><label>Mutation σ</label><b id="statMutation">0.35</b></div>
+      <div class="cell"><label>Stagnation</label><b id="statStagnation">0</b></div>
+      <div class="cell"><label>Validation fit</label><b id="statValFitness">—</b></div>
+      <div class="cell"><label>Params</label><b id="statParams">—</b></div>
+      <div class="cell wide"><label>Activation mix</label><b id="statActivations">—</b></div>
+    </div>
+
+    <div class="graphwrap">
+      <header>
+        <h3>Fitness per generation</h3>
+        <button id="graphReset" type="button">Reset graph</button>
+      </header>
+      <svg id="trainGraph" viewBox="0 0 640 180" role="img" aria-label="Fitness history chart"></svg>
+    </div>
+
+    <div class="inspectorwrap">
+      <h3>Champion network</h3>
+      <svg id="netViz" viewBox="0 0 640 240" role="img" aria-label="Champion network diagram"></svg>
+      <div id="netCaption">No network selected.</div>
+    </div>
+
+    <div class="trainsettings">
+      <label>Intensity
+        <select id="intensitySelect" aria-label="Training intensity">
+          <option value="low">Low</option>
+          <option value="normal" selected>Normal</option>
+          <option value="high">High</option>
+          <option value="max">Maximum</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" id="backgroundToggle">
+        Continue training in background
+      </label>
+    </div>
+
+    <p id="trainNote">Training runs in a Web Worker — the Play tab stays fully responsive.</p>
+  </section>
+
+</div>
+
+<script type="module">
+  import './js/main.js';
+</script>
+</body>
+</html>

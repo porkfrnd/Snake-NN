@@ -1,0 +1,106 @@
+'use strict';
+
+import {
+  GRID_W, GRID_H, CELL_COUNT, START_LENGTH,
+  DIRS, turnDir, nextCell, isOutside, buildObservation, spawnFood,
+} from '../game/GameRules.js';
+
+/**
+ * SnakeSimulation — headless, DOM-free Snake driven by explicit step() calls.
+ * Built on GameRules so movement/collision/food semantics match Play mode exactly.
+ *
+ * Typed-array state, zero allocation per step:
+ *   occ   Uint8Array  — cell occupancy for O(1) collision + food placement
+ *   bx/by Int16Array  — ring buffer of body cells (head pointer + length)
+ */
+export class SnakeSimulation {
+  constructor({ wrap = false, maxSteps = 1200, maxStepsWithoutFood = 120 } = {}) {
+    this.wrap = wrap;
+    this.maxSteps = maxSteps;
+    this.maxStepsWithoutFood = maxStepsWithoutFood;
+    this.occ = new Uint8Array(CELL_COUNT);
+    this.bx = new Int16Array(CELL_COUNT);
+    this.by = new Int16Array(CELL_COUNT);
+    this.obs = new Float32Array(8);
+    this.reset();
+  }
+
+  reset(seedRng = null) {
+    this.occ.fill(0);
+    this.length = START_LENGTH;
+    const cx = GRID_W >> 1, cy = GRID_H >> 1;
+    // Ring layout: head at the HIGHEST slot, tail below it (head advances by +1).
+    for (let i = 0; i < START_LENGTH; i++) {
+      const x = cx - i, y = cy;
+      const slot = START_LENGTH - 1 - i;
+      this.bx[slot] = x; this.by[slot] = y;
+      this.occ[y * GRID_W + x] = 1;
+    }
+    this.headPtr = START_LENGTH - 1;
+    this.dirIndex = 1; // right
+    this.steps = 0;
+    this.stepsSinceFood = 0;
+    this.foods = 0;
+    this.foodIdx = -1;
+    this._spawnFood(seedRng);
+    return this;
+  }
+
+  _spawnFood(seedRng) {
+    const rand = seedRng
+      ? () => Math.floor(seedRng.next() * CELL_COUNT)
+      : () => (Math.random() * CELL_COUNT) | 0;
+    const idx = spawnFood(rand, (i) => this.occ[i] === 0);
+    this.foodIdx = idx; // -1 => board full (win)
+  }
+
+  get headX() { return this.bx[this.headPtr]; }
+  get headY() { return this.by[this.headPtr]; }
+
+  /** One tick. Returns 'moved' | 'ate' | {dead: reason} | 'win'. */
+  step(action, seedRng = null) {
+    this.dirIndex = turnDir(this.dirIndex, action);
+    const { x: nx, y: ny } = nextCell(this.headX, this.headY, this.dirIndex, this.wrap);
+
+    if (!this.wrap && isOutside(nx, ny)) return { dead: 'wall' };
+
+    const cell = ny * GRID_W + nx;
+    const eating = cell === this.foodIdx;
+    const tailPtr = (this.headPtr - this.length + 1 + CELL_COUNT) % CELL_COUNT;
+    // Moving into the vacating tail cell is legal only when NOT eating (tail stays on a eat tick).
+    if (this.occ[cell] === 1 && !(cell === tailPtr && !eating)) return { dead: 'self' };
+
+    this.headPtr = (this.headPtr + 1) % CELL_COUNT;
+    this.bx[this.headPtr] = nx;
+    this.by[this.headPtr] = ny;
+    this.occ[cell] = 1;
+    if (!eating) {
+      this.occ[this.by[tailPtr] * GRID_W + this.bx[tailPtr]] = 0;
+    }
+    this.steps++;
+    this.stepsSinceFood++;
+
+    if (eating) {
+      this.length++;
+      this.foods++;
+      this.stepsSinceFood = 0;
+      this._spawnFood(seedRng);
+      if (this.foodIdx < 0) return 'win';
+      return 'ate';
+    }
+
+    if (this.stepsSinceFood >= this.maxStepsWithoutFood) return { dead: 'starve' };
+    if (this.steps >= this.maxSteps) return { dead: 'cap' };
+    return eating ? 'ate' : 'moved';
+  }
+
+  /** Build the shared 8-input observation into this.obs (same code as Play mode). */
+  observation() {
+    return buildObservation(
+      this.obs, this.headX, this.headY, this.dirIndex,
+      this.foodIdx % GRID_W, Math.floor(this.foodIdx / GRID_W),
+      this.length, this.wrap,
+      (x, y) => (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) ? true : this.occ[y * GRID_W + x] === 1,
+    );
+  }
+}
