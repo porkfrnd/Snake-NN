@@ -9,26 +9,45 @@ import { Population } from './Population.js';
  * EvolutionEngine — elitism + tournament selection + Gaussian mutation +
  * rare activation flips + random immigrants + adaptive mutation on stagnation.
  *
- * The global champion lives here and can NEVER regress: it is only replaced
- * when a strictly better fitness appears, and it survives generation resets.
+ * Timer curriculum: each generation evaluates under a step budget that grows
+ * linearly (getTimeBudget), so early generations select greedy efficiency and
+ * later ones force space management as bodies lengthen.
+ *
+ * The global champion lives here and can NEVER regress on its COMPARABLE
+ * score: candidates are ranked by `championScore(net)` — validation on unseen
+ * seeds at a fixed reference budget supplied by the worker — so a growing
+ * training budget cannot inflate later generations past genuinely better
+ * earlier ones. Without a callback the raw training fitness is used.
  */
 export class EvolutionEngine {
-  constructor(cfg, seed = null) {
+  constructor(cfg, seed = null, opts = {}) {
     this.cfg = cfg;
     this.rng = new Random(seed === null ? (Math.random() * 0xffffffff) >>> 0 : seed);
     this.generation = 0;
     this.stagnation = 0;
     this.mutationStrength = cfg.mutationStrength;
-    this.champion = null; // { net, fitness, generation, foods }
-    this.population = new Population(cfg.populationSize, this.rng);
+    this.arch = {
+      dims: opts.dims ?? undefined,
+      hidden: opts.dims ? undefined : (opts.hidden ?? cfg.defaultHidden),
+      activation: opts.activation ?? cfg.defaultActivation,
+    };
+    this.champion = null; // { net, fitness (= comparable score), trainFitness, foods, generation }
+    this.population = new Population(cfg.populationSize, this.rng, this.arch);
+  }
+
+  /** Step budget for the current generation's games (linear growth, capped). */
+  getTimeBudget() {
+    const c = this.cfg;
+    return Math.min(c.timeBudgetMax, c.timeBudgetStart + Math.max(0, this.generation) * c.timeBudgetGrowth);
   }
 
   /**
-   * Advance one generation. `evaluateOne(i)` is supplied by the caller (worker)
-   * so it can batch/yield between individuals. Returns summary stats.
+   * Advance one generation. `evaluateOne(net)` is supplied by the caller
+   * (worker) so it can batch/yield between individuals; `championScore(net)`
+   * (optional) re-scores the leading candidate on comparable conditions.
    * Generation numbering starts at 1 after the first completed pass.
    */
-  evolve(evaluateOne) {
+  evolve(evaluateOne, championScore) {
     this.generation++;
 
     // 1) Evaluate anyone not yet evaluated this generation.
@@ -41,14 +60,16 @@ export class EvolutionEngine {
     const stats = this.population.stats();
     const ranked = stats.ranked;
 
-    // 2) Champion protection — strictly better only, never regresses.
+    // 2) Champion protection — strictly better COMPARABLE score only.
     const bestIdx = ranked[0];
     const bestNet = this.population.nets[bestIdx];
     const bestMeta = this.population.meta[bestIdx];
-    if (!this.champion || bestMeta.fitness > this.champion.fitness) {
+    const candScore = championScore ? championScore(bestNet) : bestMeta.fitness;
+    if (!this.champion || candScore > this.champion.fitness) {
       this.champion = {
         net: bestNet.clone(),
-        fitness: bestMeta.fitness,
+        fitness: candScore,          // comparable across generations
+        trainFitness: bestMeta.fitness,
         foods: bestMeta.foods,
         generation: this.generation,
       };
@@ -87,11 +108,19 @@ export class EvolutionEngine {
     }
 
     for (let i = 0; i < immigrantCount && nextNets.length < size; i++) {
-      nextNets.push(new NeuralNetwork({ activation: this.rng.pick(ACTIVATIONS) }));
+      nextNets.push(new NeuralNetwork({
+        rng: this.rng,
+        ...(this.arch.dims ? { dims: this.arch.dims } : { hidden: this.arch.hidden }),
+        activation: this.rng.chance(0.7) ? this.arch.activation : this.rng.pick(ACTIVATIONS),
+      }));
       nextMeta.push({ fitness: -Infinity, foods: 0, steps: 0, evaluated: false });
     }
     while (nextNets.length < size) { // safety
-      nextNets.push(new NeuralNetwork({ activation: this.rng.pick(ACTIVATIONS) }));
+      nextNets.push(new NeuralNetwork({
+        rng: this.rng,
+        ...(this.arch.dims ? { dims: this.arch.dims } : { hidden: this.arch.hidden }),
+        activation: this.arch.activation,
+      }));
       nextMeta.push({ fitness: -Infinity, foods: 0, steps: 0, evaluated: false });
     }
 
@@ -106,6 +135,7 @@ export class EvolutionEngine {
 
     return {
       generation: this.generation,
+      timeBudget: this.getTimeBudget(),
       bestFitness: stats.best,
       avgFitness: stats.avg,
       bestScore: stats.bestScore,
@@ -135,6 +165,6 @@ export class EvolutionEngine {
     this.stagnation = 0;
     this.mutationStrength = this.cfg.mutationStrength;
     this.champion = null;
-    this.population = new Population(this.cfg.populationSize, this.rng);
+    this.population = new Population(this.cfg.populationSize, this.rng, this.arch);
   }
 }

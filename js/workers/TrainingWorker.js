@@ -5,13 +5,18 @@
  * inference, fitness, evolution. The main thread only sends commands and
  * renders stats. Batched evaluation with setTimeout yields keeps this worker
  * responsive to PAUSE/STOP messages at every intensity level.
+ *
+ * Timer curriculum: games run under a growing step budget (engine.getTimeBudget);
+ * champions are ranked by fixed-budget validation on unseen seeds so scores stay
+ * comparable across generations.
  */
 
 import { EvolutionEngine } from '../training/EvolutionEngine.js';
 import { FitnessEvaluator } from '../training/FitnessEvaluator.js';
 import { TrainingConfig, resolveIntensity } from '../training/TrainingConfig.js';
+import { normalizeHidden } from '../ai/NetworkConfig.js';
+import { isActivation } from '../ai/ActivationFunctions.js';
 import { WorkerMessageType as MSG } from '../utils/Constants.js';
-import { Random } from '../utils/Random.js';
 
 let engine = null;
 let evaluator = null;
@@ -30,9 +35,18 @@ function post(type, data = {}, transfer = []) {
   self.postMessage({ type, ...data }, transfer);
 }
 
-function init() {
+function init(archPrefs = {}) {
   cfg = { ...TrainingConfig };
-  engine = new EvolutionEngine(cfg, (Math.random() * 0xffffffff) >>> 0);
+  let hidden, activation;
+  try {
+    hidden = archPrefs.hidden !== undefined ? normalizeHidden(archPrefs.hidden) : undefined;
+  } catch { hidden = undefined; }
+  if (isActivation(archPrefs.activation)) activation = archPrefs.activation;
+
+  engine = new EvolutionEngine(cfg, (Math.random() * 0xffffffff) >>> 0, {
+    ...(hidden ? { hidden } : {}),
+    ...(activation ? { activation } : {}),
+  });
   evaluator = new FitnessEvaluator(cfg);
   validationSeeds = Array.from({ length: cfg.validationSeeds }, () => (Math.random() * 0xffffffff) >>> 0);
   cursor = 0;
@@ -40,9 +54,12 @@ function init() {
   windowGames = 0;
   windowSteps = 0;
   lastChampionPost = -1;
+  const net0 = engine.population.nets[0];
   post(MSG.READY, {
     populationSize: cfg.populationSize,
-    parameterCount: engine.population.nets[0].parameterCount,
+    parameterCount: net0.parameterCount,
+    shape: net0.shape,
+    timeBudget: engine.getTimeBudget(),
   });
 }
 
@@ -54,10 +71,11 @@ function workTick() {
   const batch = interacting ? 1 : intensity.batch;
 
   const pop = engine.population;
+  const budget = engine.getTimeBudget(); // curriculum: grows each generation
   const end = Math.min(pop.size, cursor + batch);
   for (; cursor < end; cursor++) {
     if (!pop.meta[cursor].evaluated) {
-      const r = evaluator.evaluate(pop.nets[cursor]);
+      const r = evaluator.evaluate(pop.nets[cursor], null, budget);
       pop.markEvaluated(cursor, r);
       windowGames++;
       windowSteps += r.steps;
@@ -69,10 +87,13 @@ function workTick() {
     return;
   }
 
-  // Generation complete -> evolve.
+  // Generation complete -> evolve. Champions rank on FIXED-budget validation
+  // over unseen seeds so scores are comparable while the budget grows.
   cursor = 0;
-  const stats = engine.evolve((net) => evaluator.evaluate(net));
-  windowSteps += stats.bestScore > 0 ? 0 : 0; // steps already counted per game above
+  const stats = engine.evolve(
+    (net) => evaluator.evaluate(net, null, engine.getTimeBudget()),
+    (net) => evaluator.validate(net, validationSeeds),
+  );
 
   const now = performance.now();
   const elapsed = Math.max(1, now - windowStart) / 1000;
@@ -80,15 +101,8 @@ function workTick() {
   const stepsPerSec = windowSteps / elapsed;
   if (elapsed >= 1.0) { windowStart = now; windowGames = 0; windowSteps = 0; }
 
-  // Validation on unseen seeds — only for a fresh champion, it's cheap.
-  let valFitness = null;
-  if (stats.improved) {
-    valFitness = evaluator.validate(engine.champion.net, validationSeeds);
-    engine.champion.valFitness = valFitness;
-  }
-
   post(MSG.STATS, {
-    stats: { ...stats, valFitness },
+    stats,
     gamesPerSec,
     stepsPerSec,
     historyPoint: { gen: stats.generation, best: stats.bestFitness, avg: stats.avgFitness },
@@ -97,15 +111,18 @@ function workTick() {
   const due = stats.generation - lastChampionPost >= cfg.championPostEvery;
   if (stats.improved || due) {
     lastChampionPost = stats.generation;
+    if (stats.improved) engine.champion.valFitness = engine.champion.fitness;
     const copy = engine.champion.net.params.slice(); // transfer a copy, keep ours
     post(MSG.CHAMPION, {
       champion: {
         fitness: engine.champion.fitness,
+        trainFitness: engine.champion.trainFitness,
         valFitness: engine.champion.valFitness ?? null,
         foods: engine.champion.foods,
         generation: engine.champion.generation,
         activation: engine.champion.net.activation,
         parameterCount: engine.champion.net.parameterCount,
+        shape: engine.champion.net.shape,
         checkpointDue: stats.generation % cfg.checkpointEvery === 0 || stats.improved,
       },
       params: copy,
@@ -120,7 +137,7 @@ self.addEventListener('message', (e) => {
   try {
     switch (msg.type) {
       case MSG.START:
-        if (!engine) init();
+        if (!engine) init(msg.arch);
         running = true;
         paused = false;
         clearTimeout(timer);
@@ -150,8 +167,24 @@ self.addEventListener('message', (e) => {
       case MSG.RESET:
         clearTimeout(timer);
         timer = 0;
-        init();               // fresh population + champion
+        init(msg.arch);       // fresh population + champion
         if (running && !paused) timer = setTimeout(workTick, 0);
+        break;
+
+      case MSG.SET_ARCH:
+        // Architecture change invalidates every genome -> full rebuild.
+        clearTimeout(timer);
+        timer = 0;
+        init({ hidden: msg.hidden });
+        if (running && !paused) timer = setTimeout(workTick, 0);
+        break;
+
+      case MSG.SET_ACTIVATION:
+        // Weights-preserving identity conversion; future immigrants follow.
+        if (engine && isActivation(msg.name)) {
+          engine.arch.activation = msg.name;
+          engine.population.convertAll(msg.name);
+        }
         break;
 
       case MSG.SET_INTENSITY:
@@ -172,11 +205,13 @@ self.addEventListener('message', (e) => {
           post(MSG.CHAMPION, {
             champion: {
               fitness: engine.champion.fitness,
+              trainFitness: engine.champion.trainFitness,
               valFitness: engine.champion.valFitness ?? null,
               foods: engine.champion.foods,
               generation: engine.champion.generation,
               activation: engine.champion.net.activation,
               parameterCount: engine.champion.net.parameterCount,
+              shape: engine.champion.net.shape,
               checkpointDue: true,
             },
             params: copy,

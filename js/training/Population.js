@@ -6,17 +6,31 @@ import { ACTIVATIONS } from '../ai/ActivationFunctions.js';
 
 /**
  * Population — a fixed-size set of networks plus per-network evaluation metadata.
+ * All networks share one architecture (dims) but carry individual activation
+ * identities drawn from `baseActivation` unless a specific one is requested.
  */
 export class Population {
-  constructor(size, rng = new Random()) {
+  constructor(size, rng = new Random(), opts = {}) {
     this.rng = rng;
+    this.opts = {
+      hidden: opts.hidden ?? undefined,
+      dims: opts.dims ?? undefined,
+      activation: opts.activation ?? undefined,
+    };
     this.nets = [];
     this.meta = []; // { fitness, foods, steps, evaluated }
-    for (let i = 0; i < size; i++) {
-      // Pass the shared rng so seeded runs are fully reproducible.
-      this.nets.push(new NeuralNetwork({ activation: rng.pick(ACTIVATIONS), rng }));
-      this.meta.push({ fitness: -Infinity, foods: 0, steps: 0, evaluated: false });
-    }
+    for (let i = 0; i < size; i++) this.spawn();
+  }
+
+  /** Create one network with the population's shape and an activation identity. */
+  spawn(activation) {
+    const o = { rng: this.rng };
+    if (this.opts.dims) o.dims = this.opts.dims;
+    else if (this.opts.hidden) o.hidden = this.opts.hidden;
+    o.activation = activation ?? this.opts.activation ?? this.rng.pick(ACTIVATIONS);
+    this.nets.push(new NeuralNetwork(o));
+    this.meta.push({ fitness: -Infinity, foods: 0, steps: 0, evaluated: false });
+    return this.nets.length - 1;
   }
 
   get size() { return this.nets.length; }
@@ -44,7 +58,8 @@ export class Population {
       return { best: -Infinity, avg: NaN, bestScore: 0, activationCounts: {}, ranked: [] };
     }
     let sum = 0;
-    const activationCounts = { tanh: 0, relu: 0, leaky_relu: 0, gelu: 0 };
+    const activationCounts = {};
+    for (const id of ACTIVATIONS) activationCounts[id] = 0;
     for (const i of ranked) {
       sum += this.meta[i].fitness;
       activationCounts[this.nets[i].activation] = (activationCounts[this.nets[i].activation] || 0) + 1;
@@ -56,6 +71,11 @@ export class Population {
       activationCounts,
       ranked,
     };
+  }
+
+  /** Convert every network to one activation identity (weights preserved). */
+  convertAll(activation) {
+    for (const net of this.nets) net.setActivation(activation);
   }
 
   /** Replace the whole population (used by Reset Training). */

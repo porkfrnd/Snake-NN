@@ -1,11 +1,10 @@
 'use strict';
 
-import { INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE, PARAM_COUNT } from '../ai/NetworkConfig.js';
-
 /**
  * NetworkVisualizer — draws one network (typically the champion) as SVG:
- * nodes per layer, edges tinted/weighted by sign and magnitude.
- * Renders a single network, never the whole population.
+ * nodes per layer, edges tinted by sign and weighted by magnitude.
+ * Adapts to ANY hidden architecture; colors come from CSS variables so the
+ * inspector follows the active theme. Renders a single network, never a population.
  */
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -16,58 +15,48 @@ export class NetworkVisualizer {
     this.H = height;
   }
 
-  /** net: NeuralNetwork (reads .params via LAYOUT offsets through serialize-free access). */
+  /** net: NeuralNetwork (uses net.dims and net.layout offsets). */
   render(net) {
     const svg = this.svg;
     svg.setAttribute('viewBox', `0 0 ${this.W} ${this.H}`);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-    const layers = [INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE];
-    const xs = [50, 240, 440, 590];
+    const dims = net.shape;
+    const layers = dims.length;
+    const pad = 50;
+    const usableW = this.W - pad * 2;
+    const xs = Array.from({ length: layers }, (_, l) =>
+      layers === 1 ? this.W / 2 : pad + (usableW * l) / (layers - 1));
+
     const pos = (li, ni) => {
-      const n = layers[li];
+      const n = dims[li];
       const usable = this.H - 30;
       const gap = usable / (n + 1);
       return { x: xs[li], y: 15 + gap * (ni + 1) };
     };
 
     const p = net.params;
-    const w1 = INPUT_SIZE * HIDDEN1;
-    const b1 = w1 + HIDDEN1;
-    const w2 = b1 + HIDDEN1 * HIDDEN2;
-    const b2 = w2 + HIDDEN1 * HIDDEN2;
-    const w3 = b2 + HIDDEN2 * OUTPUT_SIZE;
+    const L = net.layout;
 
     const edge = (x1, y1, x2, y2, w) => {
-      const l = document.createElementNS(NS, 'line');
-      l.setAttribute('x1', x1); l.setAttribute('y1', y1);
-      l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-      l.setAttribute('stroke', w >= 0 ? '#15803d' : '#b91c1c');
-      l.setAttribute('stroke-width', 0.6);
-      l.setAttribute('stroke-opacity', Math.min(0.55, 0.08 + Math.abs(w) * 0.25).toFixed(2));
-      svg.appendChild(l);
+      const line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+      line.setAttribute('stroke', w >= 0 ? 'var(--viz-pos)' : 'var(--viz-neg)');
+      line.setAttribute('stroke-width', 0.6);
+      line.setAttribute('stroke-opacity', Math.min(0.55, 0.08 + Math.abs(w) * 0.25).toFixed(2));
+      svg.appendChild(line);
     };
 
-    // Edges (all of them — 447 lines is cheap for SVG)
-    for (let i = 0; i < INPUT_SIZE; i++) {
-      const a = pos(0, i);
-      for (let j = 0; j < HIDDEN1; j++) {
-        const b = pos(1, j);
-        edge(a.x, a.y, b.x, b.y, p[i * HIDDEN1 + j]);
-      }
-    }
-    for (let i = 0; i < HIDDEN1; i++) {
-      const a = pos(1, i);
-      for (let j = 0; j < HIDDEN2; j++) {
-        const b = pos(2, j);
-        edge(a.x, a.y, b.x, b.y, p[b1 + i * HIDDEN2 + j]);
-      }
-    }
-    for (let i = 0; i < HIDDEN2; i++) {
-      const a = pos(2, i);
-      for (let j = 0; j < OUTPUT_SIZE; j++) {
-        const b = pos(3, j);
-        edge(a.x, a.y, b.x, b.y, p[b2 + i * OUTPUT_SIZE + j]);
+    // All edges — a few thousand lines is still cheap for SVG at these limits.
+    for (let l = 0; l < L.length; l++) {
+      const { w: wOff, inSize, outSize } = L[l];
+      for (let i = 0; i < inSize; i++) {
+        const a = pos(l, i);
+        for (let j = 0; j < outSize; j++) {
+          const b = pos(l + 1, j);
+          edge(a.x, a.y, b.x, b.y, p[wOff + i * outSize + j]);
+        }
       }
     }
 
@@ -78,29 +67,31 @@ export class NetworkVisualizer {
       c.setAttribute('cx', x); c.setAttribute('cy', y);
       c.setAttribute('r', r);
       c.setAttribute('fill', fill);
-      c.setAttribute('stroke', '#555');
+      c.setAttribute('stroke', 'var(--viz-node-stroke)');
       c.setAttribute('stroke-width', 0.8);
       svg.appendChild(c);
     };
-    for (let i = 0; i < INPUT_SIZE; i++) node(0, i, 5, '#fff');
-    for (let i = 0; i < HIDDEN1; i++) node(1, i, 4.5, '#fff');
-    for (let i = 0; i < HIDDEN2; i++) node(2, i, 4.5, '#fff');
-    for (let i = 0; i < OUTPUT_SIZE; i++) node(3, i, 6, '#dbeafe');
+    for (let l = 0; l < layers; l++) {
+      const outLayer = l === layers - 1;
+      for (let i = 0; i < dims[l]; i++) {
+        node(l, i, l === 0 ? 5 : outLayer ? 6 : 4.5, outLayer ? 'var(--viz-out)' : 'var(--viz-node)');
+      }
+    }
 
     // Labels
-    const label = (x, y, text) => {
+    const label = (x, text) => {
       const t = document.createElementNS(NS, 'text');
-      t.setAttribute('x', x); t.setAttribute('y', y);
+      t.setAttribute('x', x); t.setAttribute('y', this.H - 2);
       t.setAttribute('font-size', 10);
-      t.setAttribute('fill', '#777');
+      t.setAttribute('fill', 'var(--muted)');
       t.setAttribute('text-anchor', 'middle');
       t.textContent = text;
       svg.appendChild(t);
     };
-    label(50, this.H - 2, `in ${INPUT_SIZE}`);
-    label(240, this.H - 2, `h1 ${HIDDEN1}`);
-    label(440, this.H - 2, `h2 ${HIDDEN2}`);
-    label(590, this.H - 2, `out ${OUTPUT_SIZE} (L/S/R)`);
+    dims.forEach((n, l) => {
+      const tag = l === 0 ? 'in' : l === layers - 1 ? 'out' : `h${l}`;
+      label(xs[l], `${tag} ${n}${l === layers - 1 ? ' (L/S/R)' : ''}`);
+    });
   }
 
   clear() {

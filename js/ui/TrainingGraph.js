@@ -28,16 +28,16 @@ export class TrainingGraph {
       svg.appendChild(el);
       return el;
     };
-    this._plot = mk('rect', { x: this.pad.l, y: this.pad.t, width: this.W - this.pad.l - this.pad.r, height: this.H - this.pad.t - this.pad.b, fill: 'none', stroke: '#d8d8d2' });
-    this._grid1 = mk('line', { stroke: '#efefe9', 'stroke-width': 1 });
-    this._grid2 = mk('line', { stroke: '#efefe9', 'stroke-width': 1 });
-    this._best = mk('polyline', { fill: 'none', stroke: '#15803d', 'stroke-width': 1.8, 'stroke-linejoin': 'round' });
-    this._avg = mk('polyline', { fill: 'none', stroke: '#8b8b84', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' });
-    this._yMax = mk('text', { x: 6, y: this.pad.t + 10, 'font-size': 10, fill: '#777' });
-    this._yMid = mk('text', { x: 6, y: this.H / 2, 'font-size': 10, fill: '#777' });
-    this._yMin = mk('text', { x: 6, y: this.H - this.pad.b, 'font-size': 10, fill: '#777' });
-    this._xMax = mk('text', { x: this.W - this.pad.r, y: this.H - 6, 'font-size': 10, fill: '#777', 'text-anchor': 'end' });
-    this._legend = mk('text', { x: this.pad.l + 8, y: this.pad.t + 14, 'font-size': 10, fill: '#777' });
+    this._plot = mk('rect', { x: this.pad.l, y: this.pad.t, width: this.W - this.pad.l - this.pad.r, height: this.H - this.pad.t - this.pad.b, fill: 'none', stroke: 'var(--border)' });
+    this._grid1 = mk('line', { stroke: 'var(--grid-line)', 'stroke-width': 1 });
+    this._grid2 = mk('line', { stroke: 'var(--grid-line)', 'stroke-width': 1 });
+    this._best = mk('polyline', { fill: 'none', stroke: 'var(--graph-line)', 'stroke-width': 1.8, 'stroke-linejoin': 'round' });
+    this._avg = mk('polyline', { fill: 'none', stroke: 'var(--graph-avg)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' });
+    this._yMax = mk('text', { x: 6, y: this.pad.t + 10, 'font-size': 10, fill: 'var(--muted)' });
+    this._yMid = mk('text', { x: 6, y: this.H / 2, 'font-size': 10, fill: 'var(--muted)' });
+    this._yMin = mk('text', { x: 6, y: this.H - this.pad.b, 'font-size': 10, fill: 'var(--muted)' });
+    this._xMax = mk('text', { x: this.W - this.pad.r, y: this.H - 6, 'font-size': 10, fill: 'var(--muted)', 'text-anchor': 'end' });
+    this._legend = mk('text', { x: this.pad.l + 8, y: this.pad.t + 14, 'font-size': 10, fill: 'var(--muted)' });
     this._legend.textContent = '— best   ┄ avg';
   }
 

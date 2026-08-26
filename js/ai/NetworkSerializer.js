@@ -1,12 +1,14 @@
 'use strict';
 
 import { NeuralNetwork } from './NeuralNetwork.js';
-import { PARAM_COUNT, INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE } from './NetworkConfig.js';
+import { calculateParameterCount } from './NetworkConfig.js';
 import { isActivation } from './ActivationFunctions.js';
 
 /**
  * NetworkSerializer — validation-first (de)serialization for checkpoints,
- * export files and worker transfers. Corrupt data throws; callers catch and fall back.
+ * export files and worker transfers. Corrupt data throws; callers catch and
+ * fall back. Shape validation is SELF-consistent: any user-chosen architecture
+ * round-trips, while tampered shapes/counts are rejected.
  */
 
 /** Validate a plain checkpoint payload; throws with a precise message on any problem. */
@@ -18,18 +20,19 @@ export function validatePayload(data) {
   const net = data.network;
   if (!net || typeof net !== 'object') throw new Error('Missing network');
   if (net.version !== 1) throw new Error('Unsupported network version');
-  const expectedShape = [INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE];
-  if (!Array.isArray(net.shape) || net.shape.length !== 4 || net.shape.some((v, i) => v !== expectedShape[i])) {
-    throw new Error(`Shape mismatch: expected ${expectedShape.join('x')}`);
+  if (!Array.isArray(net.shape)) throw new Error('Missing shape');
+
+  let expected;
+  try { expected = calculateParameterCount(net.shape).total; }
+  catch { throw new Error(`Invalid shape: ${net.shape}`); }
+  if (net.parameterCount !== expected) {
+    throw new Error(`Parameter count mismatch for shape ${net.shape.join('x')}: expected ${expected}, got ${net.parameterCount}`);
   }
   if (!isActivation(net.activation)) throw new Error(`Unknown activation: ${net.activation}`);
-  if (net.parameterCount !== PARAM_COUNT) {
-    throw new Error(`Parameter count mismatch: expected ${PARAM_COUNT}, got ${net.parameterCount}`);
+  if (!Array.isArray(net.params) || net.params.length !== expected) {
+    throw new Error(`params must be an array of length ${expected}`);
   }
-  if (!Array.isArray(net.params) || net.params.length !== PARAM_COUNT) {
-    throw new Error(`params must be an array of length ${PARAM_COUNT}`);
-  }
-  for (let i = 0; i < PARAM_COUNT; i++) {
+  for (let i = 0; i < expected; i++) {
     if (!Number.isFinite(net.params[i])) throw new Error(`Non-finite parameter at index ${i}`);
   }
 

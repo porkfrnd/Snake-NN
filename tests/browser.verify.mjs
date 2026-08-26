@@ -22,6 +22,19 @@ async function main() {
   await new Promise((r) => setTimeout(r, 600));
   await page.screenshot({ path: shots + 'v_menu.png' });
 
+  // --- Dark mode: toggle -> data-theme flips, grain overlay present ---
+  await page.click('#themeToggle');
+  await new Promise((r) => setTimeout(r, 250));
+  const theme = await page.evaluate(() => ({
+    dataset: document.documentElement.dataset.theme,
+    btnLabel: document.getElementById('themeToggle').textContent,
+    bodyBg: getComputedStyle(document.body).backgroundColor,
+    grainLayer: getComputedStyle(document.body, '::after').backgroundImage.includes('svg'),
+    boardFill: document.querySelector('#gameBoard rect')?.getAttribute('fill'),
+  }));
+  console.log('THEME:', JSON.stringify(theme));
+  await page.screenshot({ path: shots + 'v_dark_menu.png' });
+
   // --- Play: start, move, eat check via state ---
   await page.click('#menuPlayBtn');
   await new Promise((r) => setTimeout(r, 2300)); // countdown 3..GO
@@ -63,6 +76,7 @@ async function main() {
     generation: document.getElementById('statGeneration').textContent,
     population: document.getElementById('statPopulation').textContent,
     best: document.getElementById('statBest').textContent,
+    timeBudget: document.getElementById('statTimeBudget').textContent,
     gamesSec: document.getElementById('statGamesSec').textContent,
     stepsSec: document.getElementById('statStepsSec').textContent,
     params: document.getElementById('statParams').textContent,
@@ -120,6 +134,58 @@ async function main() {
     console.log('FRAME TIMING while training (ms):', JSON.stringify(jank));
     await page.click('#trainStop');
   }
+
+  // --- v2: activation picker + architecture editor (worker stopped) ---
+  await page.select('#activationSelect', 'mish');
+  await new Promise((r) => setTimeout(r, 200));
+  const actPick = await page.evaluate(() => ({
+    value: document.getElementById('activationSelect').value,
+    note: document.getElementById('trainNote').textContent,
+  }));
+  console.log('ACTIVATION PICK:', JSON.stringify(actPick));
+
+  await page.click('#archAddLayer');            // [16,15] -> [16,15,2]
+  await new Promise((r) => setTimeout(r, 150));
+  const arch1 = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#archEditor .archrow').length,
+    params: document.getElementById('archParams').textContent,
+  }));
+  await page.click('#archEditor .archrow:first-child button[data-act="inc"]'); // 16 -> 17
+  await new Promise((r) => setTimeout(r, 150));
+  const arch2 = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#archEditor .archrow').length,
+    params: document.getElementById('archParams').textContent,
+    note: document.getElementById('trainNote').textContent,
+  }));
+  console.log('ARCH EDIT:', JSON.stringify({ afterAdd: arch1, afterInc: arch2 }));
+
+  // Start with the NEW architecture -> READY reports its param count.
+  await page.click('#trainStart');
+  await new Promise((r) => setTimeout(r, 3500));
+  const customRun = await page.evaluate(() => ({
+    params: document.getElementById('statParams').textContent,
+    gen: document.getElementById('statGeneration').textContent,
+    timeBudget: document.getElementById('statTimeBudget').textContent,
+    mix: document.getElementById('statActivations').textContent,
+  }));
+  console.log('CUSTOM ARCH RUN:', JSON.stringify(customRun));
+  await page.screenshot({ path: shots + 'v_dark_train_custom.png' });
+  await page.click('#trainStop');
+  await new Promise((r) => setTimeout(r, 400));
+
+  // Reload -> theme/architecture/activation all persist.
+  await page.reload({ waitUntil: 'networkidle0' });
+  await new Promise((r) => setTimeout(r, 500));
+  const persisted = await page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    btnLabel: document.getElementById('themeToggle').textContent,
+    archRows: document.querySelectorAll('#archEditor .archrow').length,
+    archParams: document.getElementById('archParams').textContent,
+    activation: document.getElementById('activationSelect').value,
+  }));
+  console.log('PERSISTED AFTER RELOAD:', JSON.stringify(persisted));
+  await page.click('#themeToggle'); // restore light for the final screenshot
+  await page.screenshot({ path: shots + 'v_after_reload.png' });
 
   console.log('\nERRORS (' + errors.length + '):');
   for (const e of errors) console.log('  ' + e);

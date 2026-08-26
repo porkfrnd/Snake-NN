@@ -25,8 +25,10 @@ export const TrainingConfig = Object.freeze({
   timeBudgetMax: 1600,        // ceiling
 
   // fitness = foods − steps·stepCost − (crash ? deathPenalty : 0)
-  // Invariant: stepCost · timeBudgetMax < 1  →  speed can never buy an apple.
-  fitnessStepCost: 0.001,
+  // Invariant: stepCost·timeBudgetMax + deathPenalty < 1 → one apple always
+  // outscores ANY amount of stalling, and speed can never purchase an apple.
+  // (0.00025 · 1600 + 0.5 = 0.9)
+  fitnessStepCost: 0.00025,
   deathPenalty: 0.5,
 
   // Champions are ranked on unseen seeds at this FIXED budget so scores stay
@@ -37,6 +39,10 @@ export const TrainingConfig = Object.freeze({
   checkpointEvery: 10,        // generations between champion checkpoints
   championPostEvery: 5,       // generations between champion transfers to UI
   historyLimit: 400,          // graph points retained (decimated beyond this)
+
+  // --- Editable architecture & activation ----------------------------------
+  defaultHidden: [16, 15],    // user-editable via the architecture editor
+  defaultActivation: 'tanh',  // base identity for fresh populations/immigrants
 });
 
 export const INTENSITY = Object.freeze({

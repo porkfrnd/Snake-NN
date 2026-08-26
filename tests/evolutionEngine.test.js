@@ -1,11 +1,13 @@
 'use strict';
 
 /**
- * Plain-assertion tests for the evolution engine.
+ * Plain-assertion tests for the evolution engine + timer-curriculum fitness.
  * Run: node tests/evolutionEngine.test.js
  */
 import { EvolutionEngine } from '../js/training/EvolutionEngine.js';
 import { TrainingConfig } from '../js/training/TrainingConfig.js';
+import { FitnessEvaluator } from '../js/training/FitnessEvaluator.js';
+import { ACTIVATIONS } from '../js/ai/ActivationFunctions.js';
 import { Random } from '../js/utils/Random.js';
 
 const CFG = {
@@ -13,7 +15,6 @@ const CFG = {
   populationSize: 30,        // small for fast tests
   elitismRate: 0.10,         // 3 elites
   immigrantRate: 0.10,       // 3 immigrants
-  maxSteps: 60,
   maxStepsWithoutFood: 40,
 };
 
@@ -37,7 +38,7 @@ t('population initializes with the configured size and random activations', () =
   const e = new EvolutionEngine(CFG, 42);
   eq(e.population.size, CFG.populationSize);
   const acts = new Set(e.population.nets.map((n) => n.activation));
-  for (const a of acts) ok(['tanh', 'relu', 'leaky_relu', 'gelu'].includes(a));
+  for (const a of acts) ok(ACTIVATIONS.includes(a), `unknown activation ${a}`);
 });
 
 t('evolve evaluates the whole population and advances the generation', () => {
@@ -52,11 +53,9 @@ t('evolve evaluates the whole population and advances the generation', () => {
 
 t('champion tracks the best fitness and never regresses', () => {
   const e = new EvolutionEngine(CFG, 7);
-  // Gen 1: some fitness.
   let s = e.evolve(fakeEvaluate);
   const firstChampion = e.champion.fitness;
   ok(firstChampion > 0);
-  // Force every subsequent generation to be worse: evaluate returns -1 fitness...
   const worse = () => ({ fitness: -1, foods: 0, steps: 1, reason: 'self' });
   for (let g = 0; g < 5; g++) {
     s = e.evolve(worse);
@@ -65,17 +64,36 @@ t('champion tracks the best fitness and never regresses', () => {
   eq(e.champion.generation, 1, 'champion still from generation 1');
 });
 
+t('time budget follows the configured growth schedule and caps out', () => {
+  const cfg = { ...CFG, timeBudgetStart: 100, timeBudgetGrowth: 7, timeBudgetMax: 130 };
+  const e = new EvolutionEngine(cfg, 42);
+  eq(e.getTimeBudget(), 100, 'generation 0 uses the start budget');
+  e.evolve(fakeEvaluate);
+  eq(e.getTimeBudget(), 107, 'grows by growth after gen 1');
+  for (let g = 0; g < 20; g++) e.evolve(fakeEvaluate);
+  eq(e.getTimeBudget(), 130, 'never exceeds the cap');
+});
+
+t('champion fitness comes from the comparable validation score, never raw training fitness', () => {
+  const e = new EvolutionEngine(CFG, 9);
+  // Training scores inflate every generation (simulating a growing budget).
+  const inflating = () => ({ fitness: 500 + e.generation * 1000, foods: 5, steps: 10, reason: 'cap' });
+  let last = e.evolve(inflating, () => -7);
+  eq(last.championFitness, -7, 'champion score IS the validation callback value');
+  for (let g = 0; g < 5; g++) {
+    last = e.evolve(inflating, () => -7);
+    ok(e.champion.fitness <= -7, 'inflating training scores can never hijack the champion title');
+  }
+});
+
 t('elites survive unchanged into the next generation', () => {
   const e = new EvolutionEngine(CFG, 99);
-  // Capture every net as it is evaluated in generation 1, with its fitness.
   const evaluated = [];
   e.evolve((net) => {
     const r = fakeEvaluate(net);
     evaluated.push({ fitness: r.fitness, params: net.params.slice() });
     return r;
   });
-  // The population NOW is generation 2 (unevaluated) and must contain the
-  // generation-1 elites verbatim — that is exactly what elitism guarantees.
   const eliteCount = Math.max(1, Math.round(CFG.populationSize * CFG.elitismRate));
   const elites = evaluated.sort((a, b) => b.fitness - a.fitness).slice(0, eliteCount);
 
@@ -95,8 +113,6 @@ t('elites survive unchanged into the next generation', () => {
 t('mutation actually alters most offspring', () => {
   const e = new EvolutionEngine(CFG, 5);
   e.evolve(fakeEvaluate);
-  // With mutation rate 0.15 and strength 0.35, children should differ from parents.
-  // Verify indirectly: run many generations; fitness spread must exist.
   const s = e.evolve(fakeEvaluate);
   ok(Number.isFinite(s.bestFitness), 'best fitness finite');
   ok(Number.isFinite(s.avgFitness), 'avg fitness finite');
@@ -111,14 +127,23 @@ t('stagnation boosts mutation strength, improvement decays it', () => {
   ok(e.mutationStrength > base, `stagnation raised strength: ${base} -> ${e.mutationStrength}`);
 });
 
-t('activation mutation is rare but real across a run', () => {
+t('activation mutation stays within the supported set', () => {
   const e = new EvolutionEngine({ ...CFG, activationMutationRate: 0.5 }, 3); // exaggerated for the test
   e.evolve(fakeEvaluate);
-  const before = new Set(e.population.nets.map((n) => n.activation));
   for (let g = 0; g < 6; g++) e.evolve(fakeEvaluate);
-  // With flips enabled, the mix should be able to change; just assert validity + diversity possible.
-  for (const n of e.population.nets) ok(['tanh', 'relu', 'leaky_relu', 'gelu'].includes(n.activation));
-  ok(before.size >= 1);
+  for (const n of e.population.nets) ok(ACTIVATIONS.includes(n.activation), `unknown activation ${n.activation}`);
+});
+
+t('architecture option: every network (incl. immigrants) has the chosen hidden sizes', () => {
+  const e = new EvolutionEngine(CFG, 13, { hidden: [4, 6], activation: 'gelu' });
+  for (const net of e.population.nets) {
+    ok(net.shape.join(',') === '8,4,6,3', `shape ${net.shape.join(',')}`);
+  }
+  e.evolve(fakeEvaluate); // builds next generation (elites, children, immigrants)
+  for (const net of e.population.nets) {
+    ok(net.shape.join(',') === '8,4,6,3', `post-evolve shape ${net.shape.join(',')}`);
+  }
+  ok(e.population.nets.some((n) => n.activation === 'gelu'), 'base activation present');
 });
 
 t('reset wipes generation, champion and population', () => {
@@ -141,16 +166,91 @@ t('full deterministic run: same seed -> same champion fitness', () => {
   eq(run(123), run(123), 'reproducible with the same seed');
 });
 
-t('real evaluation smoke: 2 generations with the actual evaluator improve or stay finite', async () => {
-  // Imported dynamically to reuse the true FitnessEvaluator.
-  const { FitnessEvaluator } = await import('../js/training/FitnessEvaluator.js');
+// ---- Timer-curriculum fitness (scripted simulations through the real evaluator) ----
+
+/** Minimal simulation double: eats one apple every `period` steps, dies on caps.
+ *  Cap semantics mirror the real simulation: checked BEFORE the step, so
+ *  steps never exceeds maxSteps. */
+function makeScriptedSim(period, deathReason = 'cap') {
+  return class {
+    constructor() { this.maxSteps = Infinity; this.maxStepsWithoutFood = Infinity; }
+    reset() {
+      this.steps = 0;
+      this.foods = 0;
+      this.foodIdx = 0;
+      this._sinceFood = 0;
+      return this;
+    }
+    observation() { return new Float32Array(8); }
+    step() {
+      if (this._sinceFood >= this.maxStepsWithoutFood) return { dead: 'starve' };
+      if (this.steps >= this.maxSteps) return { dead: deathReason };
+      this.steps++;
+      this._sinceFood++;
+      if (this.steps % period === 0) { this.foods++; this._sinceFood = 0; return 'ate'; }
+      return 'moved';
+    }
+  };
+}
+
+t('timer fitness: equal apples, the FASTER snake scores higher', () => {
+  const cfg = { ...CFG };
+  const evFast = new FitnessEvaluator(cfg);
+  evFast.sim = new (makeScriptedSim(5))();          // apple every 5 steps
+  evFast.sim.maxSteps = cfg.timeBudgetStart;
+  const evSlow = new FitnessEvaluator(cfg);
+  evSlow.sim = new (makeScriptedSim(10))();         // apple every 10 steps
+  evSlow.sim.maxSteps = cfg.timeBudgetStart;
+
+  const dummyNet = { forward: () => new Float32Array(3) };
+  const rFast = evFast.evaluate(dummyNet, null, cfg.timeBudgetStart);
+  const rSlow = evSlow.evaluate(dummyNet, null, cfg.timeBudgetStart);
+  ok(rFast.foods > rSlow.foods, `faster snake ate more within the budget (${rFast.foods} vs ${rSlow.foods})`);
+  ok(rFast.fitness > rSlow.fitness, 'more apples within the same timer wins');
+});
+
+t('timer fitness: an apple always beats stalling, speed can never buy one (invariant)', () => {
+  // (a) step cost alone stays under one apple across the whole budget:
+  ok(
+    CFG.fitnessStepCost * CFG.timeBudgetMax < 1,
+    `stepCost*timeBudgetMax = ${CFG.fitnessStepCost * CFG.timeBudgetMax} must stay under 1`,
+  );
+  // (b) even WITH the crash penalty, the worst single-apple snake outscores
+  //     the best possible zero-apple staller:
+  const worstOneApple = 1 - CFG.fitnessStepCost * CFG.timeBudgetMax - CFG.deathPenalty;
+  const bestZeroApple = 0; // no stall term can push a foodless game above ~0
+  ok(worstOneApple > bestZeroApple - 1e-9, `worst 1-apple (${worstOneApple}) must beat best staller`);
+});
+
+t('timer fitness: evaluation respects the imposed budget', () => {
+  const ev = new FitnessEvaluator({ ...CFG });
+  ev.sim = new (makeScriptedSim(3))();
+  const dummyNet = { forward: () => new Float32Array(3) };
+  const r = ev.evaluate(dummyNet, null, 90);
+  eq(r.reason, 'cap', 'game ended on the budget');
+  ok(r.steps <= 90, `steps ${r.steps} within budget 90`);
+});
+
+t('validation runs at the FIXED reference budget regardless of the training budget', () => {
+  const cfg = { ...CFG };
+  const ev = new FitnessEvaluator(cfg);
+  ev.sim = new (makeScriptedSim(4))();
+  const dummyNet = { forward: () => new Float32Array(3) };
+  // Two "training" budgets, same validation seeds -> identical validation score.
+  const v1 = ev.validate(dummyNet, [11, 22]);
+  const v2 = ev.validate(dummyNet, [11, 22], cfg.validationBudget);
+  eq(v1, v2, 'default validate() budget is the fixed reference budget');
+});
+
+t('real evaluation smoke: 2 generations with the actual evaluator stay finite', async () => {
   const e = new EvolutionEngine({ ...CFG, populationSize: 12 }, 77);
   const ev = new FitnessEvaluator(e.cfg);
   let s = null;
-  for (let g = 0; g < 2; g++) s = e.evolve((net) => ev.evaluate(net));
+  for (let g = 0; g < 2; g++) s = e.evolve((net) => ev.evaluate(net, null, e.getTimeBudget()));
   ok(Number.isFinite(s.bestFitness));
   ok(Number.isFinite(s.avgFitness));
-  ok(e.champion && e.champion.fitness >= s.bestFitness - 1e-9 || true, 'champion >= gen best or earlier');
+  ok(Number.isFinite(s.championFitness), 'champion carries a finite comparable score');
+  ok(s.timeBudget >= CFG.timeBudgetStart, 'stats expose the current time budget');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

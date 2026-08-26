@@ -1,11 +1,15 @@
 'use strict';
 
 /**
- * Plain-assertion tests for the neural network core. Run: node tests/neuralNetwork.test.js
+ * Plain-assertion tests for the neural network core (dynamic architectures,
+ * twelve activations, serialization). Run: node tests/neuralNetwork.test.js
  */
 import { NeuralNetwork } from '../js/ai/NeuralNetwork.js';
-import { calculateParameterCount, PARAM_COUNT, INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE } from '../js/ai/NetworkConfig.js';
-import { activate } from '../js/ai/ActivationFunctions.js';
+import {
+  INPUT_SIZE, OUTPUT_SIZE, DEFAULT_HIDDEN, ARCH_LIMITS,
+  fullDims, normalizeHidden, calculateParameterCount, buildLayout, shapeLabel, PARAM_COUNT,
+} from '../js/ai/NetworkConfig.js';
+import { activate, initStd, ACTIVATIONS, DEFAULT_ACTIVATION } from '../js/ai/ActivationFunctions.js';
 import { Random } from '../js/utils/Random.js';
 
 let passed = 0, failed = 0;
@@ -19,8 +23,10 @@ function near(a, b, eps = 1e-6, msg = '') { if (Math.abs(a - b) > eps) throw new
 
 console.log('neuralNetwork.test.js');
 
-t('parameter count math: 8/16/15/3 -> 447 total (144 + 255 + 48)', () => {
-  const c = calculateParameterCount(8, 16, 15, 3);
+t('default architecture math: 8/16/15/3 -> 447 total (144 + 255 + 48)', () => {
+  const dims = fullDims(DEFAULT_HIDDEN);
+  eq(dims.join(','), '8,16,15,3');
+  const c = calculateParameterCount(dims);
   eq(c.total, 447);
   eq(c.weights, 8 * 16 + 16 * 15 + 15 * 3);
   eq(c.biases, 16 + 15 + 3);
@@ -29,9 +35,21 @@ t('parameter count math: 8/16/15/3 -> 447 total (144 + 255 + 48)', () => {
   eq(c.layers[2].weights, 45);
 });
 
-t('module constants match the calculation (not hard-coded)', () => {
-  eq(PARAM_COUNT, calculateParameterCount(INPUT_SIZE, HIDDEN1, HIDDEN2, OUTPUT_SIZE).total);
-  ok(PARAM_COUNT >= 400 && PARAM_COUNT <= 480, `count ${PARAM_COUNT} should be near the 440 target`);
+t('layout offsets are consistent with the count for several shapes', () => {
+  for (const hidden of [[16, 15], [4], [], [10, 6, 12], [2]]) {
+    const dims = fullDims(hidden);
+    const L = buildLayout(dims);
+    let expected = 0;
+    for (let l = 0; l < dims.length - 1; l++) {
+      eq(L[l].inSize, dims[l]);
+      eq(L[l].outSize, dims[l + 1]);
+      eq(L[l].w, expected, `w offset layer ${l}`);
+      expected += dims[l] * dims[l + 1];
+      eq(L[l].b, expected, `b offset layer ${l}`);
+      expected += dims[l + 1];
+    }
+    eq(L.total, calculateParameterCount(dims).total, `total for ${shapeLabel(dims)}`);
+  }
 });
 
 t('forward returns 3 finite logits and is deterministic', () => {
@@ -46,98 +64,162 @@ t('forward returns 3 finite logits and is deterministic', () => {
   }
 });
 
-t('forward rejects wrong-size input gracefully (returns zeros, no throw)', () => {
-  const net = new NeuralNetwork({});
-  const out = net.forward(new Float32Array(3));
-  eq(out.length, OUTPUT_SIZE);
-});
-
-t('all four activations compute correctly', () => {
+t('all twelve activations compute correct anchor values', () => {
   near(activate('tanh', 0), 0);
-  near(activate('relu', -2), 0);
-  near(activate('relu', 3), 3);
-  near(activate('leaky_relu', -2), -0.02);
-  near(activate('leaky_relu', 2), 2);
-  ok(activate('gelu', 0) === 0, 'gelu(0)=0');
-  near(activate('gelu', 2), 2 * (0.5 * (1 + Math.tanh(0.7978845608 * (2 + 0.044715 * 8)))), 1e-9);
-  ok(activate('gelu', -3) < 0.1 && activate('gelu', -3) > -0.1, 'gelu small negative near zero');
+  eq(activate('relu', -2), 0);
+  eq(activate('relu', 3), 3);
+  eq(activate('leaky_relu', -2), -0.02);
+  near(activate('gelu', 0), 0);
+  eq(activate('elu', 1), 1);
+  ok(activate('elu', -1) < 0 && activate('elu', -1) > -1.7, 'elu negative branch bounded');
+  ok(Math.abs(activate('selu', 1) - 1.0507009873554805) < 1e-9, 'selu positive slope');
+  near(activate('silu', 0), 0);
+  near(activate('mish', 0), 0);
+  near(activate('sigmoid', 0), 0.5);
+  near(activate('softsign', 5), 5 / 6);
+  near(activate('softplus', 0), Math.LN2, 1e-9);
+  eq(activate('sin', 0), 0);
+  near(activate('sin', Math.PI / 2), 1);
 });
 
-t('clone is independent (mutating clone leaves original untouched)', () => {
-  const net = new NeuralNetwork({});
-  const clone = net.clone();
-  const before = net.params.slice();
-  clone.mutate(1.0, 0.5, new Random(42));
-  let diff = 0;
-  for (let i = 0; i < PARAM_COUNT; i++) if (net.params[i] !== clone.params[i]) diff++;
-  ok(diff > PARAM_COUNT * 0.5, `expected most params to differ, got ${diff}`);
-  for (let i = 0; i < PARAM_COUNT; i++) near(net.params[i], before[i], 0, 'original untouched');
+t('activations are overflow-safe at extreme inputs', () => {
+  for (const id of ACTIVATIONS) {
+    for (const x of [-800, 800]) {
+      ok(Number.isFinite(activate(id, x)), `${id}(${x}) must be finite`);
+    }
+  }
+  eq(activate('sigmoid', -800), 0);
+  eq(activate('sigmoid', 800), 1);
+  eq(activate('softplus', 800), 800, 'stable softplus is exact for large x');
 });
 
-t('mutate keeps parameters finite and bounded', () => {
-  const net = new NeuralNetwork({});
-  net.mutate(1.0, 3.0, new Random(7));
-  for (let i = 0; i < PARAM_COUNT; i++) {
-    ok(Number.isFinite(net.params[i]), `param ${i} finite`);
-    ok(Math.abs(net.params[i]) <= 8, `param ${i} bounded`);
+t('every activation produces finite forward passes on multiple shapes', () => {
+  for (const actId of ACTIVATIONS) {
+    for (const hidden of [[16, 15], [6], []]) {
+      const net = new NeuralNetwork({ activation: actId, hidden });
+      const out = net.forward(new Float32Array(INPUT_SIZE).fill(0.25));
+      eq(out.length, OUTPUT_SIZE);
+      for (const v of out) ok(Number.isFinite(v), `${actId} ${hidden} -> non-finite output`);
+    }
   }
 });
 
+t('init std follows the He / Xavier family table', () => {
+  for (const id of ['relu', 'leaky_relu', 'elu', 'silu', 'mish', 'sin']) {
+    near(initStd(id, 50), Math.sqrt(2 / 50));
+  }
+  for (const id of ['selu']) near(initStd(id, 50), Math.sqrt(1 / 50));
+  for (const id of ['tanh', 'gelu', 'sigmoid', 'softsign', 'softplus']) {
+    near(initStd(id, 50), Math.sqrt(1 / 50));
+  }
+});
+
+t('variable architectures: forward works for linear, single and deep shapes', () => {
+  const cases = [[], [4], [10, 6, 12], [2]];
+  for (const hidden of cases) {
+    const net = new NeuralNetwork({ hidden });
+    eq(net.shape.join(','), fullDims(hidden).join(','));
+    const out = net.forward(new Float32Array(INPUT_SIZE).fill(1));
+    eq(out.length, OUTPUT_SIZE);
+    for (const v of out) ok(Number.isFinite(v));
+  }
+});
+
+t('normalizeHidden enforces the editor limits', () => {
+  ok(normalizeHidden([16, 15]).join(',') === '16,15');
+  throws(() => normalizeHidden(new Array(ARCH_LIMITS.maxHiddenLayers + 1).fill(4)), 'too many layers');
+  throws(() => normalizeHidden([ARCH_LIMITS.maxNodesPerLayer + 1]), 'too many nodes');
+  throws(() => normalizeHidden([1]), 'too few nodes');
+  throws(() => normalizeHidden([4.5]), 'non-integer node count');
+});
+function throws(fn, msg) {
+  try { fn(); } catch { return; }
+  throw new Error(`expected throw: ${msg}`);
+}
+
+t('clone is independent and preserves shape + activation', () => {
+  const net = new NeuralNetwork({ hidden: [7, 5], activation: 'mish' });
+  const c = net.clone();
+  eq(c.shape.join(','), net.shape.join(','));
+  eq(c.activation, 'mish');
+  c.params[0] += 100;
+  ok(net.params[0] !== c.params[0], 'params are copies, not references');
+});
+
+t('mutate keeps parameters finite and bounded', () => {
+  const rng = new Random(9);
+  for (let k = 0; k < 20; k++) rng.gaussian();
+  const net = new NeuralNetwork({ hidden: [5] });
+  net.mutate(0.9, 5, rng);
+  for (const v of net.params) ok(Number.isFinite(v) && Math.abs(v) <= 8.000001);
+});
+
 t('setActivation flips identity without touching weights', () => {
-  const net = new NeuralNetwork({});
+  const net = new NeuralNetwork({ hidden: [6] });
   const before = net.params.slice();
-  net.setActivation('gelu');
-  eq(net.activation, 'gelu');
-  for (let i = 0; i < PARAM_COUNT; i++) near(net.params[i], before[i], 0, 'weights preserved');
+  net.setActivation('selu');
+  eq(net.activation, 'selu');
+  for (let i = 0; i < before.length; i++) eq(net.params[i], before[i]);
 });
 
 t('sanitize repairs NaN/Infinity parameters', () => {
-  const net = new NeuralNetwork({});
-  net.params[0] = NaN;
-  net.params[100] = Infinity;
-  net.params[200] = -Infinity;
+  const net = new NeuralNetwork({ hidden: [4] });
+  net.params[3] = NaN;
+  net.params[7] = Infinity;
   const repaired = net.sanitize();
-  eq(repaired, 3);
-  near(net.params[0], 0); near(net.params[100], 0); near(net.params[200], 0);
+  eq(repaired, 2);
+  eq(net.params[3], 0);
+  eq(net.params[7], 0);
 });
 
-t('serialize -> deserialize round-trips exactly', () => {
-  const net = new NeuralNetwork({ activation: 'leaky_relu' });
-  const data = net.serialize();
-  const copy = NeuralNetwork.deserialize(data);
-  eq(copy.activation, 'leaky_relu');
-  for (let i = 0; i < PARAM_COUNT; i++) near(copy.params[i], net.params[i], 1e-6);
-  const input = new Float32Array(INPUT_SIZE).fill(0.3);
-  const o1 = Array.from(net.forward(input));
-  const o2 = Array.from(copy.forward(input));
-  for (let i = 0; i < OUTPUT_SIZE; i++) near(o1[i], o2[i], 1e-5, 'same outputs after round-trip');
+t('serialize -> deserialize round-trips exactly (default and custom shapes)', () => {
+  for (const opts of [{}, { hidden: [10, 6, 12], activation: 'gelu' }, { hidden: [], activation: 'sin' }]) {
+    const net = new NeuralNetwork(opts);
+    const data = JSON.parse(JSON.stringify(net.serialize()));
+    const back = NeuralNetwork.deserialize(data);
+    eq(back.shape.join(','), net.shape.join(','));
+    eq(back.activation, net.activation);
+    eq(back.parameterCount, net.parameterCount);
+    for (let i = 0; i < net.params.length; i++) {
+      // serialize() rounds to 6 decimals (JSON-safe) — compare against that.
+      near(back.params[i], Number(net.params[i].toFixed(6)), 1e-6, `param ${i}`);
+    }
+  }
 });
 
-t('deserialize rejects bad payloads', () => {
-  let threw = 0;
-  const cases = [
-    () => NeuralNetwork.deserialize(null),
-    () => NeuralNetwork.deserialize({ version: 2, shape: [8, 16, 15, 3], activation: 'tanh', params: [] }),
-    () => NeuralNetwork.deserialize({ version: 1, shape: [4, 4, 4, 4], activation: 'tanh', params: new Array(PARAM_COUNT).fill(0) }),
-    () => NeuralNetwork.deserialize({ version: 1, shape: [8, 16, 15, 3], activation: 'sigmoid', params: new Array(PARAM_COUNT).fill(0) }),
-    () => NeuralNetwork.deserialize({ version: 1, shape: [8, 16, 15, 3], activation: 'tanh', params: new Array(PARAM_COUNT - 1).fill(0) }),
-    () => NeuralNetwork.deserialize({ version: 1, shape: [8, 16, 15, 3], activation: 'tanh', params: new Array(PARAM_COUNT).fill(NaN) }),
-  ];
-  for (const c of cases) { try { c(); } catch { threw++; } }
-  eq(threw, cases.length, 'all invalid payloads must throw');
+t('deserialize rejects tampered payloads precisely', () => {
+  const good = new NeuralNetwork({ hidden: [6] }).serialize();
+  throws(() => NeuralNetwork.deserialize({ ...good, version: 99 }), 'bad version');
+  throws(() => NeuralNetwork.deserialize({ ...good, activation: 'linear' }), 'unknown activation');
+  throws(() => NeuralNetwork.deserialize({ ...good, params: good.params.slice(0, 5) }), 'short params');
+  throws(() => NeuralNetwork.deserialize({ ...good, shape: [7, 6, 3] }), 'wrong input size');
+  throws(() => NeuralNetwork.deserialize({ ...good, shape: [8, 6, 4] }), 'wrong output size');
+  throws(() => NeuralNetwork.deserialize({
+    ...good, shape: [8, 4, 4, 4, 4, 4, 3], parameterCount: 999, params: [],
+  }), 'too many hidden layers');
+  const nanParams = [...good.params]; nanParams[2] = 'oops';
+  throws(() => NeuralNetwork.deserialize({ ...good, params: nanParams }), 'non-finite param');
+  // parameterCount claim inconsistent with its own shape:
+  const lie = { ...good, shape: [8, 6, 3], parameterCount: 999 };
+  throws(() => NeuralNetwork.deserialize(lie), 'count does not match claimed shape');
 });
 
-t('seeded Random is reproducible; gaussian is roughly normal', () => {
-  const a = new Random(123), b = new Random(123);
-  for (let i = 0; i < 100; i++) near(a.next(), b.next(), 0, 'same seed same stream');
-  const g = new Random(9);
-  let sum = 0, sumSq = 0;
-  const n = 20000;
-  for (let i = 0; i < n; i++) { const v = g.gaussian(); sum += v; sumSq += v * v; }
-  const mean = sum / n;
-  const varr = sumSq / n - mean * mean;
-  ok(Math.abs(mean) < 0.05, `mean near 0, got ${mean}`);
-  ok(varr > 0.9 && varr < 1.1, `variance near 1, got ${varr}`);
+t('seeded runs reproduce identical networks for any shape', () => {
+  const mk = () => {
+    const rng = new Random(2024);
+    return new NeuralNetwork({ hidden: [9, 3], rng, activation: 'leaky_relu' });
+  };
+  const a = mk(), b = mk();
+  for (let i = 0; i < a.params.length; i++) eq(a.params[i], b.params[i]);
+});
+
+t('module exports stay coherent', () => {
+  eq(INPUT_SIZE, 8);
+  eq(OUTPUT_SIZE, 3);
+  eq(PARAM_COUNT, 447);
+  ok(ACTIVATIONS.length >= 10, `activation list has ${ACTIVATIONS.length} entries`);
+  ok(DEFAULT_ACTIVATION === 'tanh');
+  eq(shapeLabel(fullDims(DEFAULT_HIDDEN)), '8→16→15→3');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

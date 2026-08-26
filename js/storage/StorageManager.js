@@ -40,4 +40,22 @@ export class StorageManager {
 
   getBackgroundTraining() { return this._get(STORAGE_KEYS.backgroundTraining, '0') === '1'; }
   setBackgroundTraining(v) { this._set(STORAGE_KEYS.backgroundTraining, v ? '1' : '0'); }
+
+  // Theme ('light' | 'dark')
+  getTheme() { return this._get(STORAGE_KEYS.theme, '') || null; }
+  setTheme(v) { this._set(STORAGE_KEYS.theme, v); }
+
+  // Architecture editor state (hidden sizes array as JSON)
+  getDefaultHidden(fallback) {
+    try {
+      const v = JSON.parse(this._get(STORAGE_KEYS.arch, 'null'));
+      if (Array.isArray(v)) return v;
+    } catch { /* fall through */ }
+    return fallback;
+  }
+  setDefaultHidden(hidden) { this._set(STORAGE_KEYS.arch, JSON.stringify(hidden)); }
+
+  // Base activation for new populations
+  getDefaultActivation(fallback) { return this._get(STORAGE_KEYS.activation, fallback); }
+  setDefaultActivation(name) { this._set(STORAGE_KEYS.activation, name); }
 }

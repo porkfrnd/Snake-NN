@@ -3,9 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
 <title>Snake — Play &amp; Neural Training</title>
 <meta name="description" content="A plain Snake game with a built-in evolutionary neural-network training mode. Vanilla JS, inline SVG, no dependencies.">
+<script>
+  // Apply the saved theme before first paint to avoid a flash.
+  (function () {
+    try {
+      var t = localStorage.getItem('snake.settings.theme');
+      if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+    } catch (e) { /* noop */ }
+  })();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2322c55e'/%3E%3Ccircle cx='23' cy='9' r='4' fill='%23dc2626'/%3E%3Cpath d='M6 22c0-4 4-4 6-6s2-4 6-4' stroke='%2315803d' stroke-width='3.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/game.css">
@@ -20,6 +30,7 @@
       <button class="tab active" id="tabPlay" aria-pressed="true">Play</button>
       <button class="tab" id="tabTrain" aria-pressed="false">Train</button>
     </nav>
+    <button id="themeToggle" type="button" aria-label="Toggle dark mode">Dark</button>
   </header>
 
   <!-- ============================== PLAY ============================== -->
@@ -38,7 +49,7 @@
 
     <div class="boardwrap" id="boardWrap">
       <svg id="gameBoard" viewBox="0 0 600 600" role="img" aria-label="Snake board">
-        <rect width="600" height="600" fill="#ffffff"/>
+        <rect width="600" height="600" fill="var(--board-bg)"/>
         <g id="gridLayer"></g>
         <g id="foodLayer"></g>
         <g id="snakeLayer"></g>
@@ -163,6 +174,7 @@
       <div class="cell"><label>Best fitness</label><b id="statBest">—</b></div>
       <div class="cell"><label>Avg fitness</label><b id="statAvg">—</b></div>
       <div class="cell"><label>Best apples</label><b id="statBestScore">0</b></div>
+      <div class="cell"><label>Time budget</label><b id="statTimeBudget">150</b></div>
       <div class="cell"><label>Games / sec</label><b id="statGamesSec">—</b></div>
       <div class="cell"><label>Steps / sec</label><b id="statStepsSec">—</b></div>
       <div class="cell"><label>Mutation σ</label><b id="statMutation">0.35</b></div>
@@ -187,15 +199,48 @@
     </div>
 
     <div class="trainsettings">
-      <label>Intensity
-        <select id="intensitySelect" aria-label="Training intensity">
-          <option value="low">Low</option>
-          <option value="normal" selected>Normal</option>
-          <option value="high">High</option>
-          <option value="max">Maximum</option>
-        </select>
-      </label>
-      <label>
+      <div class="settingblock">
+        <label>Activation
+          <select id="activationSelect" aria-label="Base activation function">
+            <option value="tanh" selected>tanh</option>
+            <option value="relu">relu</option>
+            <option value="leaky_relu">leaky ReLU</option>
+            <option value="gelu">GELU</option>
+            <option value="elu">ELU</option>
+            <option value="selu">SELU</option>
+            <option value="silu">SiLU (swish)</option>
+            <option value="mish">Mish</option>
+            <option value="sigmoid">sigmoid</option>
+            <option value="softsign">softsign</option>
+            <option value="softplus">softplus</option>
+            <option value="sin">sin (SIREN)</option>
+          </select>
+        </label>
+        <p class="hint">Applies to the current population instantly (weights kept) and to new runs.</p>
+      </div>
+
+      <div class="settingblock grow">
+        <label>Architecture</label>
+        <div id="archEditor" aria-label="Hidden layer editor"></div>
+        <div class="archfoot">
+          <button id="archAddLayer" type="button">+ Layer</button>
+          <b id="archParams" aria-live="polite">—</b>
+        </div>
+        <p class="hint">Inputs (8) and outputs (3) are fixed. Changes start a fresh population.</p>
+      </div>
+
+      <div class="settingblock">
+        <label>Intensity
+          <select id="intensitySelect" aria-label="Training intensity">
+            <option value="low">Low</option>
+            <option value="normal" selected>Normal</option>
+            <option value="high">High</option>
+            <option value="max">Maximum</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="bgline">
         <input type="checkbox" id="backgroundToggle">
         Continue training in background
       </label>

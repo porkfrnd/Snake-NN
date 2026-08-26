@@ -3,6 +3,10 @@
 import { WorkerMessageType as MSG } from '../utils/Constants.js';
 import { TrainingConfig, INTENSITY } from '../training/TrainingConfig.js';
 import { NeuralNetwork } from '../ai/NeuralNetwork.js';
+import {
+  DEFAULT_HIDDEN, ARCH_LIMITS, fullDims, calculateParameterCount, shapeLabel,
+} from '../ai/NetworkConfig.js';
+import { ACTIVATIONS } from '../ai/ActivationFunctions.js';
 import { CheckpointManager } from '../storage/CheckpointManager.js';
 import { TrainingGraph } from './TrainingGraph.js';
 import { NetworkVisualizer } from './NetworkVisualizer.js';
@@ -12,7 +16,8 @@ import { fmt } from '../utils/MathUtils.js';
  * TrainingPanel — main-thread client for TrainingWorker.
  * Owns the worker lifecycle (create/terminate), renders real measured stats,
  * auto-saves the champion, and hands the champion to UIManager for replay.
- * No simulation logic lives here — only message plumbing and DOM.
+ * Also hosts the architecture editor and activation picker; no simulation
+ * logic lives here — only message plumbing and DOM.
  */
 export class TrainingPanel {
   constructor({ storage, ui }) {
@@ -26,9 +31,19 @@ export class TrainingPanel {
     this.championMeta = null;  // { fitness, generation, activation, valFitness }
     this._interactTimer = 0;
 
+    // User-selected base activation + editable hidden sizes (persisted).
+    this.activation = this.storage.getDefaultActivation(TrainingConfig.defaultActivation);
+    if (!ACTIVATIONS.includes(this.activation)) this.activation = TrainingConfig.defaultActivation;
+    let savedHidden = this.storage.getDefaultHidden(null);
+    try {
+      this.hidden = this._sanitizeHidden(savedHidden ?? TrainingConfig.defaultHidden);
+    } catch { this.hidden = [...TrainingConfig.defaultHidden]; }
+
     this.graph = new TrainingGraph(document.getElementById('trainGraph'), { limit: TrainingConfig.historyLimit });
     this.viz = new NetworkVisualizer(document.getElementById('netViz'));
 
+    this._syncSettingInputs();
+    this._renderArch();
     this._bind();
     this._restoreCheckpoint();
   }
@@ -60,6 +75,25 @@ export class TrainingPanel {
       this._post(MSG.SET_INTENSITY, { intensity: e.target.value });
     });
 
+    // Activation picker: converts the live population (weights preserved)
+    // and becomes the base identity for fresh runs/immigrants.
+    this._$('activationSelect')?.addEventListener('change', (e) => {
+      const name = e.target.value;
+      if (!ACTIVATIONS.includes(name)) return;
+      this.activation = name;
+      this.storage.setDefaultActivation(name);
+      if (this.worker) this._post(MSG.SET_ACTIVATION, { name });
+      this._note(`Activation set to ${name} — population converted, weights preserved.`);
+    });
+
+    // Architecture editor: one delegated listener handles every row button.
+    this._$('archEditor')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      this._archEdit(btn.dataset.act, Number(btn.dataset.layer));
+    });
+    this._$('archAddLayer')?.addEventListener('click', () => this._archEdit('add', -1));
+
     this._$('backgroundToggle')?.addEventListener('change', (e) => {
       this.storage.setBackgroundTraining(e.target.checked);
       if (!e.target.checked && document.hidden && this.running && !this.paused) this._pause();
@@ -80,6 +114,102 @@ export class TrainingPanel {
       if (!this.running || this.paused) return;
       if (document.hidden && !this.storage.getBackgroundTraining()) this._pause();
     });
+  }
+
+  // ---- architecture & activation UI ----
+
+  _sanitizeHidden(arr) {
+    if (!Array.isArray(arr)) throw new Error('hidden must be an array');
+    return arr.map((n) => {
+      const v = Math.round(Number(n));
+      if (!Number.isFinite(v) || v < ARCH_LIMITS.minNodesPerLayer || v > ARCH_LIMITS.maxNodesPerLayer) {
+        throw new Error('layer size out of range');
+      }
+      return v;
+    }).slice(0, ARCH_LIMITS.maxHiddenLayers);
+  }
+
+  /** Reflect persisted prefs into the controls (called once at boot). */
+  _syncSettingInputs() {
+    const sel = this._$('activationSelect');
+    if (sel) sel.value = this.activation;
+  }
+
+  /** Redraw the hidden-layer rows + live param counter from this.hidden. */
+  _renderArch() {
+    const host = this._$('archEditor');
+    if (!host) return;
+    host.textContent = '';
+    if (this.hidden.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'hint';
+      empty.textContent = '(no hidden layers — linear 8→3)';
+      host.appendChild(empty);
+    }
+    this.hidden.forEach((n, i) => {
+      const row = document.createElement('div');
+      row.className = 'archrow';
+      row.innerHTML =
+        `<span class="lname">h${i + 1}</span>` +
+        `<button type="button" data-act="dec" data-layer="${i}" aria-label="Remove a node from layer ${i + 1}">−</button>` +
+        `<b>${n}</b>` +
+        `<button type="button" data-act="inc" data-layer="${i}" aria-label="Add a node to layer ${i + 1}">+</button>` +
+        `<button type="button" class="remove" data-act="del" data-layer="${i}" aria-label="Delete layer ${i + 1}">✕</button>`;
+      host.appendChild(row);
+    });
+
+    let count;
+    try { count = calculateParameterCount(fullDims(this.hidden)).total; }
+    catch { count = null; }
+    const out = this._$('archParams');
+    if (out) {
+      out.textContent = count != null && count <= ARCH_LIMITS.maxParams
+        ? `${count} params · ${shapeLabel(fullDims(this.hidden))}`
+        : '—';
+    }
+    const addBtn = this._$('archAddLayer');
+    if (addBtn) addBtn.disabled = this.hidden.length >= ARCH_LIMITS.maxHiddenLayers;
+  }
+
+  /** Handle an editor action; persists and (with consent) rebuilds the run. */
+  _archEdit(act, layer) {
+    const L = ARCH_LIMITS;
+    const h = [...this.hidden];
+    if (act === 'add') {
+      if (h.length >= L.maxHiddenLayers) return;
+      h.push(L.minNodesPerLayer);
+    } else if (act === 'del') {
+      if (layer < 0 || layer >= h.length) return;
+      h.splice(layer, 1);
+    } else if (act === 'inc') {
+      if (h[layer] >= L.maxNodesPerLayer) return;
+      h[layer]++;
+    } else if (act === 'dec') {
+      if (h[layer] <= L.minNodesPerLayer) return;
+      h[layer]--;
+    }
+
+    let count;
+    try { count = calculateParameterCount(fullDims(h)).total; }
+    catch { return; } // invalid intermediate state — ignore
+    if (count > L.maxParams) {
+      this._note(`Too large — keep the network under ${L.maxParams} parameters.`);
+      return;
+    }
+
+    this.hidden = h;
+    this._renderArch();
+    this.storage.setDefaultHidden(h);
+
+    // Applying: a stopped worker picks it up on next Start; a live one
+    // rebuilds immediately (fresh population — old genomes have the wrong shape).
+    if (this.worker && window.confirm('Apply architecture now? This starts a FRESH population.')) {
+      this.graph.reset();
+      this._post(MSG.SET_ARCH, { hidden: h });
+      this._note(`Architecture ${shapeLabel(fullDims(h))} applied — fresh population.`);
+    } else {
+      this._note(`Architecture set to ${shapeLabel(fullDims(h))}${this.worker ? '' : ' — used on next Start.'}`);
+    }
   }
 
   _restoreCheckpoint() {
@@ -127,11 +257,15 @@ export class TrainingPanel {
     this.worker?.postMessage({ type, ...data }, transfer);
   }
 
+  _arch() {
+    return { hidden: this.hidden.slice(), activation: this.activation };
+  }
+
   _start() {
     if (this.running) return;
     this._spawnWorker();
     this._post(MSG.SET_INTENSITY, { intensity: this._$('intensitySelect').value });
-    this._post(MSG.START);
+    this._post(MSG.START, { arch: this._arch() });
     this.running = true;
     this.paused = false;
     this._buttons();
@@ -172,7 +306,7 @@ export class TrainingPanel {
     this._caption();
     this._spawnWorker();
     this._post(MSG.SET_INTENSITY, { intensity: this._$('intensitySelect').value });
-    this._post(MSG.RESET);
+    this._post(MSG.RESET, { arch: this._arch() });
     this._post(MSG.START);
     this.running = true;
     this.paused = false;
@@ -244,6 +378,18 @@ export class TrainingPanel {
       case MSG.READY:
         this._$('statPopulation').textContent = msg.populationSize;
         this._$('statParams').textContent = msg.parameterCount;
+        if (msg.timeBudget != null) this._$('statTimeBudget').textContent = msg.timeBudget;
+        // Worker normalized the shape — mirror it into the editor.
+        if (Array.isArray(msg.shape)) {
+          const hidden = msg.shape.slice(1, -1);
+          if (hidden.join(',') !== this.hidden.join(',')) {
+            try {
+              this.hidden = this._sanitizeHidden(hidden);
+              this._renderArch();
+              this.storage.setDefaultHidden(this.hidden);
+            } catch { /* keep editor as-is */ }
+          }
+        }
         break;
 
       case MSG.STATS: {
@@ -252,6 +398,7 @@ export class TrainingPanel {
         this._$('statBest').textContent = fmt(s.bestFitness);
         this._$('statAvg').textContent = Number.isFinite(s.avgFitness) ? fmt(s.avgFitness) : '—';
         this._$('statBestScore').textContent = s.bestScore;
+        if (s.timeBudget != null) this._$('statTimeBudget').textContent = s.timeBudget;
         this._$('statGamesSec').textContent = fmt(msg.gamesPerSec, 0);
         this._$('statStepsSec').textContent = fmt(msg.stepsPerSec, 0);
         this._$('statMutation').textContent = fmt(s.mutationStrength, 2);
@@ -266,7 +413,11 @@ export class TrainingPanel {
 
       case MSG.CHAMPION: {
         const c = msg.champion;
-        const net = new NeuralNetwork({ activation: c.activation, params: msg.params });
+        const net = new NeuralNetwork({
+          activation: c.activation,
+          params: msg.params,
+          ...(Array.isArray(c.shape) ? { dims: c.shape } : {}),
+        });
         this.champion = net;
         this.championMeta = {
           fitness: c.fitness,
@@ -306,7 +457,7 @@ export class TrainingPanel {
     const m = this.championMeta;
     el.textContent = `Champion — gen ${m.generation} · fitness ${fmt(m.fitness)}` +
       (m.valFitness != null ? ` · validation ${fmt(m.valFitness)}` : '') +
-      ` · ${m.activation} · ${this.champion.parameterCount} params`;
+      ` · ${m.activation} · ${shapeLabel(this.champion.shape)} (${this.champion.parameterCount} params)`;
   }
 
   _note(text) {

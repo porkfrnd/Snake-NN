@@ -7,16 +7,19 @@ import { GRID_W, GRID_H } from './GameRules.js';
  * Palette: snake greens, food red, subtle grid — deliberately plain per design spec.
  */
 const NS = 'http://www.w3.org/2000/svg';
+/* Colors resolve through CSS variables so the board follows the active theme
+   (light / matte-grain dark). Values are defined in css/base.css. */
 const COLORS = {
-  grid: '#e9e9e4',
-  border: '#d8d8d2',
-  head: '#15803d',
-  body: '#22c55e',
-  tail: '#86efac',
-  food: '#dc2626',
-  stem: '#7f1d1d',
-  leaf: '#16a34a',
-  pulse: 'rgba(220,38,38,.35)',
+  grid: 'var(--grid-line)',
+  border: 'var(--board-border)',
+  head: 'var(--snake-head)',
+  body: 'var(--snake-body)',
+  tail: 'var(--snake-tail)',
+  food: 'var(--food)',
+  stem: 'var(--food-stem)',
+  leaf: 'var(--food-leaf)',
+  pulse: 'var(--food-pulse)',
+  eye: 'var(--snake-eye)',
 };
 
 export class GameRenderer {
@@ -101,14 +104,15 @@ export class GameRenderer {
     ];
     const [a, b] = offs[dirIndex % 4];
     if (!this._eyes) {
-      const mk = (fill) => {
+      const mk = (fill, small) => {
         const e = document.createElementNS(NS, 'circle');
-        e.setAttribute('r', fill === '#111' ? 1.8 : 3.2);
+        if (small) e.setAttribute('r', 1.8);
+        else e.setAttribute('r', 3.2);
         e.setAttribute('fill', fill);
         this.snakeLayer.appendChild(e);
         return e;
       };
-      this._eyes = [mk('#fff'), mk('#fff'), mk('#111'), mk('#111')];
+      this._eyes = [mk('var(--panel)'), mk('var(--panel)'), mk(COLORS.eye, true), mk(COLORS.eye, true)];
     }
     const pos = [
       [cx + a.x, cy + a.y], [cx + b.x, cy + b.y],
