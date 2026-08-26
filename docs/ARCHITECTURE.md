@@ -67,5 +67,16 @@ worker: evaluate batch ──► (yield) ──► … until population done
                                         └─► UI: inspector + auto-checkpoint
 ```
 
+The loop runs until a human pauses or stops it. Each generation uses a
+time budget of `cfg.timeBudgetStart + (generation−1) · cfg.timeBudgetGrowth`
+steps (capped at `cfg.timeBudgetMax`), so the evaluation horizon grows as a
+curriculum: early generations favor greedy efficiency, later generations force
+space management as the snake's body lengthens.
+
+Fitness within that budget is `foods − steps · stepCost − (crash ? deathPenalty : 0)`,
+with `stepCost` chosen so `stepCost · timeBudgetMax < 1` (cannot outweigh an
+apple by stalling). Selection is otherwise unchanged (tournament k=4, elitism 10%,
+immigrants 3%, adaptive mutation).
+
 The UI never requests per-generation permission; the loop runs until a human
 pauses or stops it.

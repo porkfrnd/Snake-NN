@@ -15,7 +15,20 @@ Everything expensive (simulation, `forward()`, fitness, evolution) runs inside
 training at Normal intensity on a mid-range laptop:
 
 - UI requestAnimationFrame median frame time: **16.7 ms** (60 fps held)
-- training throughput: **~1,100 games/sec**, **~90k–125k steps/sec**
+- training throughput: **~1,100 games/sec**, **~90k–125k steps/sec**'
+
+The evaluation horizon grows each generation as a curriculum:
+`cfg.timeBudgetStart + (generation−1) · cfg.timeBudgetGrowth`, capped at
+`cfg.timeBudgetMax` (default 150 → +3/generation → 1,600). This means:
+
+- **Throughput declines gradually** as the budget grows — games/sec scales roughly
+  inversely with the current budget. At budget 1,600 the rate drops to ~100 games/sec.
+- **Steps/sec remains the more stable metric** because it reflects per-step cost
+  (inference + simulation) which is largely budget-independent.
+- The UI displays the current `timeBudget` per generation so the trade-off is
+  visible (e.g. "budget 400 · games/sec 320")
+
+
 
 ## Typed arrays, reused buffers
 

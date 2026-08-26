@@ -13,11 +13,29 @@ export const TrainingConfig = Object.freeze({
   mutationStrength: 0.35,     // Gaussian stddev
   activationMutationRate: 0.01, // 1% of offspring flip activation function
   stagnationLimit: 8,         // generations without champion improvement
-  maxSteps: 1200,             // hard cap per game
-  maxStepsWithoutFood: 120,   // stagnation cap per game (anti-circling)
+  maxStepsWithoutFood: 120,   // early-cut for hopeless games (compute saver)
+
+  // --- Timer curriculum -----------------------------------------------------
+  // Each game gets a fixed step budget; apples eaten within it decide fitness.
+  // Every step spent not eating is pure opportunity cost, so fastest paths win.
+  // The budget grows each generation (short greedy horizon first, long
+  // space-management horizon later) and selection tracks it automatically.
+  timeBudgetStart: 150,       // steps allowed in generation 1
+  timeBudgetGrowth: 3,        // extra steps per generation
+  timeBudgetMax: 1600,        // ceiling
+
+  // fitness = foods − steps·stepCost − (crash ? deathPenalty : 0)
+  // Invariant: stepCost · timeBudgetMax < 1  →  speed can never buy an apple.
+  fitnessStepCost: 0.001,
+  deathPenalty: 0.5,
+
+  // Champions are ranked on unseen seeds at this FIXED budget so scores stay
+  // comparable while the training budget grows around them.
+  validationSeeds: 3,
+  validationBudget: 400,
+
   checkpointEvery: 10,        // generations between champion checkpoints
   championPostEvery: 5,       // generations between champion transfers to UI
-  validationSeeds: 3,         // unseen-seed re-evaluations for the champion
   historyLimit: 400,          // graph points retained (decimated beyond this)
 });
 

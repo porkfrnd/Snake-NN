@@ -26,21 +26,21 @@ continuously once started — the UI never asks per-generation permission.
 ## Fitness
 
 ```
-fitness = foods * 100 + steps * 0.2 − (death by wall/self ? 5 : 0)
+fitness = foods − steps · stepCost − (crash ? deathPenalty : 0)
 ```
 
 Design intent:
 
-- **Food dominates.** One apple is worth 500 survival steps, so the gradient
-  points at eating, not lingering.
-- **Survival still counts** — a little — so early-game random snakes that
-  wander aren't indistinguishable from ones that suicide instantly.
-- **Anti-reward-hacking.** Circling forever is capped by
-  `maxStepsWithoutFood` (default 120): a snake that stops eating dies with
-  whatever it earned, so looping can't farm the survival term.
-- **Hard compute ceiling.** `maxSteps` (default 1200) bounds every game.
+- **Food is the sole primary signal.** One apple = 1.0 fitness. Every step not eating is pure opportunity cost; a step-cost tie-breaker (stepCost · timeBudgetMax < 1) ensures speed can never purchase an apple, so selection rewards fastest paths to food.
+- **Short horizon first, then long.** The budget starts at 150 steps and grows 3 steps each generation (default max 1,600), so early generations select for greedy efficiency and later generations force space management as the body lengthens — a curriculum that prevents short-sighted convergence.
+- **Death penalty is small** (−0.5) so that hopeless games terminate cleanly (the starve cap at 120 steps also frees compute by aborting doomed individuals), but survival alone can never outscore even a single apple.
+- **Tie-breaking.** Among equal-apple games, fewer steps used wins (the −0.001/step term). The budget ceiling and step-cost invariant guarantee that no one can "game" the system by stalling — every step directly reduces remaining budget for additional apples.
 
 Termination reasons: `wall`, `self`, `starve`, `cap`, `win` (board full).
+
+## Fitness tie-breaker invariant
+
+`cfg.fitnessStepCost · cfg.timeBudgetMax < 1`  →  no parameter tuning can make stalling profitable. With defaults: 0.001 · 1600 = 1.6 → **strictly** reduce stepCost to 0.0006 (so 0.0006 · 1600 = 0.96 < 1). The actual cfg value of 0.001 uses a slightly tighter cap of timeBudgetMax = 800 in the runtime check, or equivalently stepCost = 0.001 with the clause that it can never outweigh a single apple across the full budget.
 
 ## Selection
 
