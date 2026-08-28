@@ -8,7 +8,7 @@ Two experiences, one code path:
 
 - **Play** — a good, simple Snake game: keyboard + touch, progressive speed,
   high score, wall wrap, sound, haptics, reduced-motion support.
-- **Train** — a real genetic algorithm that evolves 447-parameter neural
+- **Train** — a real genetic algorithm that evolves 607-parameter neural
   networks to play Snake, running in a Web Worker at ~1,000+ games/sec while
   the rest of the app stays fully responsive.
 
@@ -47,14 +47,17 @@ with every apple. Wall wrap is off by default and toggleable in Settings.
 
 Switch to the **Train** tab and press **Start**.
 
-- **What evolves** — networks shaped `8 → 16 → 15 → 3` (two hidden layers,
-  447 weights + biases, computed by `calculateParameterCount()`, never
-  hard-coded). Inputs: food direction, danger ahead/left/right, food distance,
-  wall proximity, body length. Outputs: turn left / straight / turn right —
-  relative turns make instant self-reversal impossible by construction.
-- **Activations** — `tanh`, `relu`, `leaky_relu`, `gelu`. Each network carries
-  one; reproduction flips it with ~1% probability, so the population mixes
-  over time (watch the live activation-mix readout).
+- **What evolves** — networks shaped `18 → 16 → 15 → 3` by default (18 inputs,
+  editable 0–4 hidden layers, 3 outputs; the 607 params are computed by
+  `calculateParameterCount()`, never hard-coded). Inputs: food direction &
+  distance, danger ahead/left/right, corridor lookahead, **food reachability**
+  and free-region size (via BFS), tail distance/safety and tail reachability.
+  Outputs: turn left / straight / turn right — relative turns make instant
+  self-reversal impossible by construction.
+- **Activations** — 12 options: `tanh`, `relu`, `leaky_relu`, `gelu`, `elu`,
+  `selu`, `silu`, `mish`, `sigmoid`, `softsign`, `softplus`, `sin`. Each network
+  carries one; reproduction flips it with ~1% probability, so the population
+  mixes over time (watch the live activation-mix readout).
 - **Loop** — elitism (top 10% copied verbatim) → tournament selection →
   Gaussian mutation → rare activation flips → 3% random immigrants. Mutation
   strength adapts: it rises during stagnation, decays back when improving.
@@ -142,7 +145,7 @@ The champion is stored in `localStorage` under `ai.checkpoint.v1` as:
 {
   "kind": "snake-nn-champion",
   "version": 1,
-  "network": { "shape": [8,16,15,3], "activation": "leaky_relu", "params": ["…447 floats…"] },
+  "network": { "shape": [18,16,15,3], "activation": "leaky_relu", "params": ["…607 floats…"] },
   "fitness": 2665.8,
   "generation": 50,
   "savedAt": "2026-08-26T10:23:37.580Z",

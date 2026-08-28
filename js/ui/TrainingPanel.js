@@ -143,7 +143,7 @@ export class TrainingPanel {
     if (this.hidden.length === 0) {
       const empty = document.createElement('span');
       empty.className = 'hint';
-      empty.textContent = '(no hidden layers — linear 8→3)';
+      empty.textContent = '(no hidden layers — linear 18→3)';
       host.appendChild(empty);
     }
     this.hidden.forEach((n, i) => {
@@ -201,14 +201,17 @@ export class TrainingPanel {
     this._renderArch();
     this.storage.setDefaultHidden(h);
 
-    // Applying: a stopped worker picks it up on next Start; a live one
-    // rebuilds immediately (fresh population — old genomes have the wrong shape).
-    if (this.worker && window.confirm('Apply architecture now? This starts a FRESH population.')) {
+    // Seamless apply — never block the user with a popup.
+    //   - live worker (running or paused): rebuild immediately with a fresh
+    //     population (old genomes have a different shape). When paused the
+    //     worker stays paused and picks it up on Resume.
+    //   - stopped: persist only, applied on the next Start.
+    if (this.worker) {
       this.graph.reset();
       this._post(MSG.SET_ARCH, { hidden: h });
       this._note(`Architecture ${shapeLabel(fullDims(h))} applied — fresh population.`);
     } else {
-      this._note(`Architecture set to ${shapeLabel(fullDims(h))}${this.worker ? '' : ' — used on next Start.'}`);
+      this._note(`Architecture set to ${shapeLabel(fullDims(h))} — used on next Start.`);
     }
   }
 

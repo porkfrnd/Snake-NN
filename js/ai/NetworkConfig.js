@@ -9,7 +9,7 @@
  * parameter count are derived. Defaults stay [16, 15] -> 447 params.
  */
 
-export const INPUT_SIZE = 8;
+export const INPUT_SIZE = 18;
 export const OUTPUT_SIZE = 3;
 export const DEFAULT_HIDDEN = [16, 15];
 

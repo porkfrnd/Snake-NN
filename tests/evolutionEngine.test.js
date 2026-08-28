@@ -137,11 +137,11 @@ t('activation mutation stays within the supported set', () => {
 t('architecture option: every network (incl. immigrants) has the chosen hidden sizes', () => {
   const e = new EvolutionEngine(CFG, 13, { hidden: [4, 6], activation: 'gelu' });
   for (const net of e.population.nets) {
-    ok(net.shape.join(',') === '8,4,6,3', `shape ${net.shape.join(',')}`);
+    ok(net.shape.join(',') === '18,4,6,3', `shape ${net.shape.join(',')}`);
   }
   e.evolve(fakeEvaluate); // builds next generation (elites, children, immigrants)
   for (const net of e.population.nets) {
-    ok(net.shape.join(',') === '8,4,6,3', `post-evolve shape ${net.shape.join(',')}`);
+    ok(net.shape.join(',') === '18,4,6,3', `post-evolve shape ${net.shape.join(',')}`);
   }
   ok(e.population.nets.some((n) => n.activation === 'gelu'), 'base activation present');
 });
@@ -168,10 +168,11 @@ t('full deterministic run: same seed -> same champion fitness', () => {
 
 // ---- Timer-curriculum fitness (scripted simulations through the real evaluator) ----
 
-/** Minimal simulation double: eats one apple every `period` steps, dies on caps.
+/** Minimal simulation double: eats one apple every `period` steps, then dies
+ *  (`deathReason`) after `dieAfter` steps (defaults to surviving to the cap).
  *  Cap semantics mirror the real simulation: checked BEFORE the step, so
  *  steps never exceeds maxSteps. */
-function makeScriptedSim(period, deathReason = 'cap') {
+function makeScriptedSim(period, { deathReason = 'cap', dieAfter = Infinity } = {}) {
   return class {
     constructor() { this.maxSteps = Infinity; this.maxStepsWithoutFood = Infinity; }
     reset() {
@@ -181,10 +182,11 @@ function makeScriptedSim(period, deathReason = 'cap') {
       this._sinceFood = 0;
       return this;
     }
-    observation() { return new Float32Array(8); }
+    observation() { return new Float32Array(18); }
     step() {
       if (this._sinceFood >= this.maxStepsWithoutFood) return { dead: 'starve' };
       if (this.steps >= this.maxSteps) return { dead: deathReason };
+      if (this.steps >= dieAfter) return { dead: deathReason };
       this.steps++;
       this._sinceFood++;
       if (this.steps % period === 0) { this.foods++; this._sinceFood = 0; return 'ate'; }
@@ -209,17 +211,48 @@ t('timer fitness: equal apples, the FASTER snake scores higher', () => {
   ok(rFast.fitness > rSlow.fitness, 'more apples within the same timer wins');
 });
 
-t('timer fitness: an apple always beats stalling, speed can never buy one (invariant)', () => {
-  // (a) step cost alone stays under one apple across the whole budget:
+// The new reward contract: apples are primary, but surviving a stable run
+// must beat greedily grabbing one more apple and dying — otherwise selection
+// would reward suicidal apple chasing (the old "feels off" behaviour).
+t('reward: survival gradient exists (same apples, no crash > crash)', () => {
+  const cfg = { ...CFG };
+  const evAlive = new FitnessEvaluator(cfg);
+  evAlive.sim = new (makeScriptedSim(6, { deathReason: 'cap' }));   // survives to cap
+  const evCrash = new FitnessEvaluator(cfg);
+  evCrash.sim = new (makeScriptedSim(6, { deathReason: 'wall' })); // same rate, dies by wall
+  const dummyNet = { forward: () => new Float32Array(3) };
+  const a = evAlive.evaluate(dummyNet, null, cfg.timeBudgetStart);
+  const c = evCrash.evaluate(dummyNet, null, cfg.timeBudgetStart);
+  eq(a.foods, c.foods, 'same apples eaten');
+  ok(c.reason === 'wall', 'crash sim died by wall');
+  ok(a.fitness > c.fitness, `surviving (${a.fitness}) beats crashing (${c.fitness}) with equal apples`);
+});
+
+t('reward: death penalty exceeds one apple — greedy-then-die never wins', () => {
+  const c = { ...CFG };
+  // A single crash costs MORE than the value of one extra apple, so a snake
+  // that risks its life for one more apple is, at best, trading +1 apple for
+  // −deathPenalty fitness — never a good deal. Surviving a +1 apple slower is
+  // always preferred over grabbing it and dying.
+  ok(c.deathPenalty > c.fitnessAppleValue, 'a crash costs more than one apple');
+  ok(c.starvationPenalty < c.fitnessAppleValue, 'starvation is real but cheaper than surviving-an-extra-apple');
+});
+
+t('reward: an apple is worth more than a whole budget of cautious survival', () => {
   ok(
-    CFG.fitnessStepCost * CFG.timeBudgetMax < 1,
-    `stepCost*timeBudgetMax = ${CFG.fitnessStepCost * CFG.timeBudgetMax} must stay under 1`,
+    CFG.fitnessStepCost * CFG.timeBudgetMax < CFG.fitnessAppleValue,
+    `STEP·timeBudgetMax = ${CFG.fitnessStepCost * CFG.timeBudgetMax} must stay under one apple (${CFG.fitnessAppleValue})`,
   );
-  // (b) even WITH the crash penalty, the worst single-apple snake outscores
-  //     the best possible zero-apple staller:
-  const worstOneApple = 1 - CFG.fitnessStepCost * CFG.timeBudgetMax - CFG.deathPenalty;
-  const bestZeroApple = 0; // no stall term can push a foodless game above ~0
-  ok(worstOneApple > bestZeroApple - 1e-9, `worst 1-apple (${worstOneApple}) must beat best staller`);
+});
+
+t('reward: starvation is penalized (no coasting without eating)', () => {
+  const cfg = { ...CFG };
+  const ev = new FitnessEvaluator(cfg);
+  ev.sim = new (makeScriptedSim(999999, { deathReason: 'starve', dieAfter: cfg.maxStepsWithoutFood }));
+  const dummyNet = { forward: () => new Float32Array(3) };
+  const r = ev.evaluate(dummyNet, null, cfg.timeBudgetStart);
+  eq(r.reason, 'starve', 'starves without food');
+  ok(r.fitness < 0, `a foodless starver scores negative (${r.fitness})`);
 });
 
 t('timer fitness: evaluation respects the imposed budget', () => {

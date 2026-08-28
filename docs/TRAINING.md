@@ -26,21 +26,43 @@ continuously once started — the UI never asks per-generation permission.
 ## Fitness
 
 ```
-fitness = foods − steps · stepCost − (crash ? deathPenalty : 0)
+fitness = foods·APPLE − steps·STEP − (crash ? DEATH : starve ? STARVE : 0)
 ```
+
+Default constants: `APPLE = 10`, `STEP = 0.004`, `DEATH = 20`, `STARVE = 5`.
 
 Design intent:
 
-- **Food is the sole primary signal.** One apple = 1.0 fitness. Every step not eating is pure opportunity cost; a step-cost tie-breaker (stepCost · timeBudgetMax < 1) ensures speed can never purchase an apple, so selection rewards fastest paths to food.
-- **Short horizon first, then long.** The budget starts at 150 steps and grows 3 steps each generation (default max 1,600), so early generations select for greedy efficiency and later generations force space management as the body lengthens — a curriculum that prevents short-sighted convergence.
-- **Death penalty is small** (−0.5) so that hopeless games terminate cleanly (the starve cap at 120 steps also frees compute by aborting doomed individuals), but survival alone can never outscore even a single apple.
-- **Tie-breaking.** Among equal-apple games, fewer steps used wins (the −0.001/step term). The budget ceiling and step-cost invariant guarantee that no one can "game" the system by stalling — every step directly reduces remaining budget for additional apples.
+- **Apples are primary but not the only signal.** One apple = 10.0. `STEP`
+  runs a real survival/efficiency gradient on *every* step of every game
+  (0.004 · 1600 = 6.4 across the full budget), so — unlike the old milestone-
+  only reward — there is selection pressure in every generation, not just when
+  an apple count crosses a new record.
+- **Steady play beats greedy suicide.** A crash costs `DEATH = 20`, i.e. two
+  apples' worth. So a snake that survives a stable 5-apple run (≈50) always
+  outranks one that grabs a greedy 6th apple and dies (60 − 20 − steps·STEP).
+  This defuses the trap that made the old AI "feel off": it no longer learns
+  to dive into its own tail chasing one more apple.
+- **No coasting.** Starvation costs `STARVE = 5`, so a snake that stops moving
+  toward food is penalized ~half an apple (the 120-step starve cap also frees
+  compute by aborting hopeless games).
+- **Short horizon first, then long.** The budget starts at 150 steps and grows
+  3 steps each generation (max 1,600), so early generations select for greedy
+  efficiency and later ones force space management as the body lengthens.
+- **Tie-breaking.** Among equal-apple games, fewer steps used wins (the
+  −0.004/step term), and the budget ceiling caps how long anyone can stall.
 
 Termination reasons: `wall`, `self`, `starve`, `cap`, `win` (board full).
 
-## Fitness tie-breaker invariant
+## Fitness invariants (enforced in tests)
 
-`cfg.fitnessStepCost · cfg.timeBudgetMax < 1`  →  no parameter tuning can make stalling profitable. With defaults: 0.001 · 1600 = 1.6 → **strictly** reduce stepCost to 0.0006 (so 0.0006 · 1600 = 0.96 < 1). The actual cfg value of 0.001 uses a slightly tighter cap of timeBudgetMax = 800 in the runtime check, or equivalently stepCost = 0.001 with the clause that it can never outweigh a single apple across the full budget.
+- `STEP · timeBudgetMax < APPLE` → an apple is always worth more than an entire
+  budget of *cautious, apple-free* survival, so food stays the objective.
+  Defaults: 0.004 · 1600 = 6.4 < 10. ✓
+- `DEATH > APPLE` → one crash costs more than one apple, so risking your life
+  for a single extra apple is never profitable. Defaults: 20 > 10. ✓
+- A surviving (non-crashing) snake of equal apples always outscores a crashing
+  one; a foodless starver scores negative and can never become champion.
 
 ## Selection
 

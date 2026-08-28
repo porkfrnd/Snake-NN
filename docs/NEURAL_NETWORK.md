@@ -2,26 +2,31 @@
 
 ## Shape and parameter math
 
-Exactly two hidden layers: `input → hidden1 → hidden2 → output`.
+User-editable hidden layers (0–4 layers, 2–32 nodes each) between a fixed
+18-input and 3-output layer: `[18, ...hidden, 3]`. The default is
+`[18, 16, 15, 3]`.
 
 ```
-INPUT_SIZE = 8, HIDDEN1 = 16, HIDDEN2 = 15, OUTPUT_SIZE = 3
+INPUT_SIZE = 18, HIDDEN1 = 16, HIDDEN2 = 15, OUTPUT_SIZE = 3
 ```
 
 The count is *computed*, never hard-coded — `NetworkConfig.calculateParameterCount()`:
 
 ```
-layer1: 8*16  weights + 16 biases = 144
+layer1: 18*16 weights + 16 biases = 304
 layer2: 16*15 weights + 15 biases = 255
 layer3: 15*3  weights +  3 biases =  48
                                   ─────
-total                              447   (target ≈ 440, window 400–480)
+total                              607
 ```
 
-## Inputs (8)
+## Inputs (18)
 
 All computed in the shared `GameRules.buildObservation()` — the same function
-used by Play-mode replay, so the network always sees the world identically:
+used by Play-mode replay, so the network always sees the world identically.
+The last ten come from a flood-fill (`floodRegion`) over navigable cells and
+agent geometry, giving the network tail-awareness and reachability that a pure
+local sensor view lacks:
 
 | # | Name | Range | Meaning |
 |---|---|---|---|
@@ -31,8 +36,23 @@ used by Play-mode replay, so the network always sees the world identically:
 | 3 | dangerLeft | {0, 1} | wall or body to the left |
 | 4 | dangerRight | {0, 1} | wall or body to the right |
 | 5 | foodDist | [0, 1] | Manhattan distance to food, normalized |
-| 6 | wallAhead | [0, 1] | 1 − free cells ahead / span (1.0 when wrap on) |
+| 6 | wallAhead | [0, 1] | 1 − free run ahead / span (1.0 when wrap on) |
 | 7 | lengthNorm | [0, 1] | length / 400 |
+| 8 | corridorAhead | [0, 1] | open cells straight ahead (up to 4) / 4 |
+| 9 | corridorLeft | [0, 1] | open cells to the left (up to 4) / 4 |
+| 10 | corridorRight | [0, 1] | open cells to the right (up to 4) / 4 |
+| 11 | foodReachable | {0, 1} | food in the head's connected free region (BFS) |
+| 12 | regionFrac | [0, 1] | size of the head's free region / 400 |
+| 13 | tailDistNorm | [0, 1] | Manhattan(head, tail) / span (short ⇒ escape route) |
+| 14 | safeAhead | {0, 1} | moving straight this tick is non-fatal (tail-aware) |
+| 15 | safeLeft | {0, 1} | moving left this tick is non-fatal (tail-aware) |
+| 16 | safeRight | {0, 1} | moving right this tick is non-fatal (tail-aware) |
+| 17 | tailReachable | {0, 1} | tail borders the head's region ⇒ an escape lane exists |
+
+`foodReachable` and `tailReachable` are the two features that let the agent stop
+boxing itself in: it learns to only chase reachable food and to keep a route to
+its own tail (the classic survival trick), instead of blindly driving into a
+dead end it cannot see.
 
 ## Outputs (3)
 
@@ -48,10 +68,11 @@ z2 = W2·a1 + b2  a2 = act(z2)
 out = W3·a2 + b3            (logits, no final activation)
 ```
 
-Parameters live in one flat `Float32Array` with layout offsets derived in
-`NetworkConfig.LAYOUT` (row-major weights per layer, biases after each).
-`forward()` writes into reusable scratch buffers (`#h1`, `#h2`, `#out`) —
-zero allocation per call, which matters at ~90k steps/sec.
+(Generalized to any number of hidden layers.) Parameters live in one flat
+`Float32Array` with layout offsets derived in `NetworkConfig.buildLayout()`
+(row-major weights per layer, biases after each). `forward()` writes into
+reusable scratch buffers — zero allocation per call, which matters at tens of
+thousands of steps/sec.
 
 ## Activations
 

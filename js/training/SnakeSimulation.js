@@ -4,6 +4,7 @@ import {
   GRID_W, GRID_H, CELL_COUNT, START_LENGTH,
   DIRS, turnDir, nextCell, isOutside, buildObservation, spawnFood,
 } from '../game/GameRules.js';
+import { INPUT_SIZE as NET_INPUT_SIZE } from '../ai/NetworkConfig.js';
 
 /**
  * SnakeSimulation — headless, DOM-free Snake driven by explicit step() calls.
@@ -21,7 +22,7 @@ export class SnakeSimulation {
     this.occ = new Uint8Array(CELL_COUNT);
     this.bx = new Int16Array(CELL_COUNT);
     this.by = new Int16Array(CELL_COUNT);
-    this.obs = new Float32Array(8);
+    this.obs = new Float32Array(NET_INPUT_SIZE);
     this.reset();
   }
 
@@ -94,13 +95,14 @@ export class SnakeSimulation {
     return eating ? 'ate' : 'moved';
   }
 
-  /** Build the shared 8-input observation into this.obs (same code as Play mode). */
+  /** Build the shared 18-input observation into this.obs (same code as Play mode). */
   observation() {
+    const tailSlot = (this.headPtr - this.length + 1 + CELL_COUNT) % CELL_COUNT;
     return buildObservation(
       this.obs, this.headX, this.headY, this.dirIndex,
       this.foodIdx % GRID_W, Math.floor(this.foodIdx / GRID_W),
       this.length, this.wrap,
-      (x, y) => (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) ? true : this.occ[y * GRID_W + x] === 1,
+      { occ: this.occ, tailIdx: this.bx[tailSlot] + this.by[tailSlot] * GRID_W, foodIdx: this.foodIdx },
     );
   }
 }

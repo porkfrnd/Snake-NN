@@ -23,14 +23,14 @@ function near(a, b, eps = 1e-6, msg = '') { if (Math.abs(a - b) > eps) throw new
 
 console.log('neuralNetwork.test.js');
 
-t('default architecture math: 8/16/15/3 -> 447 total (144 + 255 + 48)', () => {
+t('default architecture math: 18/16/15/3 -> 607 total (288 + 240 + 48)', () => {
   const dims = fullDims(DEFAULT_HIDDEN);
-  eq(dims.join(','), '8,16,15,3');
+  eq(dims.join(','), '18,16,15,3');
   const c = calculateParameterCount(dims);
-  eq(c.total, 447);
-  eq(c.weights, 8 * 16 + 16 * 15 + 15 * 3);
+  eq(c.total, 607);
+  eq(c.weights, 18 * 16 + 16 * 15 + 15 * 3);
   eq(c.biases, 16 + 15 + 3);
-  eq(c.layers[0].weights, 128);
+  eq(c.layers[0].weights, 288);
   eq(c.layers[1].weights, 240);
   eq(c.layers[2].weights, 45);
 });
@@ -200,7 +200,7 @@ t('deserialize rejects tampered payloads precisely', () => {
   const nanParams = [...good.params]; nanParams[2] = 'oops';
   throws(() => NeuralNetwork.deserialize({ ...good, params: nanParams }), 'non-finite param');
   // parameterCount claim inconsistent with its own shape:
-  const lie = { ...good, shape: [8, 6, 3], parameterCount: 999 };
+  const lie = { ...good, shape: [18, 6, 3], parameterCount: 999 };
   throws(() => NeuralNetwork.deserialize(lie), 'count does not match claimed shape');
 });
 
@@ -214,12 +214,12 @@ t('seeded runs reproduce identical networks for any shape', () => {
 });
 
 t('module exports stay coherent', () => {
-  eq(INPUT_SIZE, 8);
+  eq(INPUT_SIZE, 18);
   eq(OUTPUT_SIZE, 3);
-  eq(PARAM_COUNT, 447);
+  eq(PARAM_COUNT, 607);
   ok(ACTIVATIONS.length >= 10, `activation list has ${ACTIVATIONS.length} entries`);
   ok(DEFAULT_ACTIVATION === 'tanh');
-  eq(shapeLabel(fullDims(DEFAULT_HIDDEN)), '8→16→15→3');
+  eq(shapeLabel(fullDims(DEFAULT_HIDDEN)), '18→16→15→3');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

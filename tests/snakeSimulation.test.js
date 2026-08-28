@@ -123,12 +123,12 @@ t('maxSteps cap terminates long games', () => {
   ok(r.dead === 'cap' || r.dead === 'wall', `cap or wall, got ${JSON.stringify(r)}`);
 });
 
-t('observation: 8 finite inputs, danger ahead detected at the wall', () => {
+t('observation: 18 finite inputs, danger ahead detected at the wall', () => {
   const s = new SnakeSimulation({});
   s.reset();
   const obs = s.observation();
-  eq(obs.length, 8);
-  for (let i = 0; i < 8; i++) ok(Number.isFinite(obs[i]), `obs[${i}] finite`);
+  eq(obs.length, 18);
+  for (let i = 0; i < 18; i++) ok(Number.isFinite(obs[i]), `obs[${i}] finite`);
 
   // Put the head at the right edge facing right: dangerAhead must be 1.
   s.occ[s.headY * GRID_W + s.headX] = 0; // detach head cell for simplicity
@@ -142,14 +142,14 @@ t('observation: 8 finite inputs, danger ahead detected at the wall', () => {
 });
 
 t('buildObservation food encoding: food ahead vs behind', () => {
-  const out = new Float32Array(8);
-  const blocked = () => false;
+  const out = new Float32Array(18);
+  const ctx = { occ: new Uint8Array(CELL_COUNT), tailIdx: -1, foodIdx: 0 };
   // Head (5,5) facing right; food at (10,5) -> ahead positive.
-  buildObservation(out, 5, 5, 1, 10, 5, 4, false, blocked);
+  buildObservation(out, 5, 5, 1, 10, 5, 4, false, ctx);
   ok(out[0] > 0, 'food ahead positive');
   ok(Math.abs(out[1]) < 0.01, 'food not to the side');
   // Food behind -> ahead negative.
-  buildObservation(out, 5, 5, 1, 2, 5, 4, false, blocked);
+  buildObservation(out, 5, 5, 1, 2, 5, 4, false, ctx);
   ok(out[0] < 0, 'food behind negative');
 });
 

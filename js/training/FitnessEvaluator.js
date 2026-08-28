@@ -7,13 +7,17 @@ import { SnakeSimulation } from './SnakeSimulation.js';
  * FitnessEvaluator — turns a network + simulation into a single honest number.
  *
  *   within a per-generation TIME BUDGET of `budget` steps:
- *   fitness = foods − steps·stepCost − (crash ? deathPenalty : 0)
+ *   fitness = foods·APPLE − steps·STEP − (crash ? DEATH : starve ? STARVE : 0)
  *
- * Every step spent not eating is pure opportunity cost, so fastest paths to
- * food win outright. The step-cost term is only a tie-breaker between equal-
- * apple games and can never purchase an apple (invariant enforced in tests:
- * stepCost · timeBudgetMax < 1). The starvation cap remains purely as a
- * compute saver that aborts hopeless games early.
+ * Apples are the primary objective but each apple is worth far more than the
+ * whole budget of cautious survival (STEP·timeBudgetMax = 6.4 < 10), while a
+ * crash costs 20 = two apples. So a snake that survives a stable 5-apple run
+ * always beats one that grabs a greedy 6th apple and dies — the network learns
+ * steady, safe play instead of suicidal greed. STEP keeps a genuine selection
+ * gradient on EVERY step of a game (not just when an apple is eaten), so even
+ * same-apple-count games rank by how efficiently they scavenge and how long
+ * they survive. The starvation cap remains a compute saver AND a penalty for
+ * hopeless stalling.
  */
 export class FitnessEvaluator {
   constructor(cfg) {
@@ -50,7 +54,9 @@ export class FitnessEvaluator {
 
     const c = this.cfg;
     const crashed = reason === 'wall' || reason === 'self';
-    const fitness = sim.foods - sim.steps * c.fitnessStepCost - (crashed ? c.deathPenalty : 0);
+    const starved = reason === 'starve';
+    const penalty = crashed ? c.deathPenalty : starved ? c.starvationPenalty : 0;
+    const fitness = sim.foods * c.fitnessAppleValue - sim.steps * c.fitnessStepCost - penalty;
     return { fitness, foods: sim.foods, steps: sim.steps, reason };
   }
 

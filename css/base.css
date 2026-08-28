@@ -154,3 +154,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role="switch"]
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Mobile: roomier touch targets, tighter gutters */
+@media (max-width: 640px) {
+  .app { padding: 10px; }
+  .top { flex-wrap: wrap; gap: 8px; }
+  .tab { padding: 8px 14px; }
+  #themeToggle { padding: 7px 12px; }
+}

@@ -69,36 +69,97 @@ export function isBlocked(x, y, wrap, blockedFn) {
   return blockedFn(x, y);
 }
 
+/** True if the cell is blocked for navigation/pathing (wall or body). */
+function isBlockedCell(x, y, wrap, occ, ignoreTailIdx) {
+  if (!wrap && isOutside(x, y)) return true;
+  const idx = y * GRID_W + x;
+  if (occ[idx] === 1 && idx !== ignoreTailIdx) return true;
+  return false;
+}
+
 /**
- * Build the 8-input observation vector into `out` (Float32Array length 8).
- * Shared by the headless simulation and champion replay so the network always
- * sees exactly the same world representation.
- *
- *  0 foodForward  [-1,1]  dot(food-head, forward)/span
- *  1 foodLeft     [-1,1]  dot(food-head, left)/span
- *  2 dangerAhead  {0,1}   wall or body straight ahead
- *  3 dangerLeft   {0,1}
- *  4 dangerRight  {0,1}
- *  5 foodDist     [0,1]   manhattan distance to food, normalized
- *  6 wallAhead    [0,1]   1 - (free cells ahead / span); 1.0 when wrapping (no walls)
- *  7 lengthNorm   [0,1]   snake length / CELL_COUNT
+ * Flood fill from the head over free (navigable) cells. Returns:
+ *   { reachable:boolean(does foodIdx sit in the head's region),
+ *     tailReachable:boolean(the tail cell was reached — an escape route),
+ *     regionSize:number # reachable free cells }
+ * `ignoreTailIdx` lets the vacating tail act as a path during this tick, so
+ * tail-chasing appears as a reachable escape. Uses a typed-array visited
+ * bitmap and an explicit queue (no recursion).
  */
-export function buildObservation(out, headX, headY, dirIndex, foodX, foodY, length, wrap, blockedFn) {
+export function floodRegion(occ, wrap, headX, headY, foodIdx, tailIdx) {
+  const visited = new Uint8Array(CELL_COUNT);
+  const qx = new Int16Array(CELL_COUNT);
+  const qy = new Int16Array(CELL_COUNT);
+  let head = 0, tail = 0;
+  let reachable = false;
+  let tailReachable = tailIdx === foodIdx;
+  let regionSize = 0;
+
+  const start = headY * GRID_W + headX;
+  if (isBlockedCell(headX, headY, wrap, occ, tailIdx)) return { reachable, tailReachable, regionSize };
+  visited[start] = 1;
+  qx[tail] = headX; qy[tail] = headY; tail++;
+  regionSize++;
+
+  while (head < tail) {
+    const x = qx[head], y = qy[head]; head++;
+    if (y * GRID_W + x === tailIdx) tailReachable = true;
+    for (const d of DIRS) {
+      const nx = x + d.x, ny = y + d.y;
+      if (!wrap && isOutside(nx, ny)) continue;
+      const ni = ny * GRID_W + nx;
+      if (ni === foodIdx) reachable = true;
+      if (visited[ni]) continue;
+      if (isBlockedCell(nx, ny, wrap, occ, tailIdx)) continue;
+      visited[ni] = 1;
+      qx[tail] = nx; qy[tail] = ny; tail++;
+      regionSize++;
+    }
+  }
+  return { reachable, tailReachable, regionSize };
+}
+
+/**
+ * Build the 18-input observation vector into `out` (Float32Array length 18).
+ * Shared by the headless simulation and champion replay so the network always
+ * sees exactly the same world representation. `ctx` supplies the occupancy
+ * mirror, the tail cell (for tail-aware safety) and the food index, letting us
+ * run flood-fill reachability that the old wall-only view never had.
+ *
+ *  0  foodForward  [-1,1] dot(food-head, forward)/span
+ *  1  foodLeft     [-1,1] dot(food-head, left)/span
+ *  2  dangerAhead  {0,1}  wall/body straight ahead (head-neighbour)
+ *  3  dangerLeft   {0,1}
+ *  4  dangerRight  {0,1}
+ *  5  foodDist     [0,1]  manhattan distance to food, normalized
+ *  6  wallAhead    [0,1]  1 - (free run ahead / span); 1.0 when wrapping
+ *  7  lengthNorm   [0,1]  length / CELL_COUNT
+ *  8  corridorAhead [0,1] open cells directly ahead (up to 4), /4
+ *  9  corridorLeft  [0,1]
+ * 10  corridorRight [0,1]
+ * 11  foodReachable {0,1} is the food in the head's connected free region?
+ * 12  regionFrac    [0,1] size of the head's free region / CELL_COUNT
+ * 13  tailDistNorm  [0,1] manhattan(head,tail)/span (short = retreat route)
+ * 14  safeAhead     {0,1} moving straight this tick is non-fatal (tail-aware)
+ * 15  safeLeft      {0,1}
+ * 16  safeRight     {0,1}
+ * 17  tailReachable {0,1} tail borders the head's region (escape exists)
+ */
+export function buildObservation(out, headX, headY, dirIndex, foodX, foodY, length, wrap, ctx) {
   const span = Math.max(GRID_W, GRID_H);
   const fwd = DIRS[dirIndex];
   const left = DIRS[(dirIndex + 3) % 4];
   const right = DIRS[(dirIndex + 1) % 4];
+  const occ = ctx.occ;
+  const tailIdx = ctx.tailIdx;
+  const foodIdx = ctx.foodIdx;
 
   const fdx = foodX - headX;
   const fdy = foodY - headY;
   out[0] = (fdx * fwd.x + fdy * fwd.y) / span;
   out[1] = (fdx * left.x + fdy * left.y) / span;
 
-  const probe = (d) => {
-    const nx = headX + d.x, ny = headY + d.y;
-    if (!wrap && isOutside(nx, ny)) return 1;
-    return blockedFn(nx, ny) ? 1 : 0;
-  };
+  const probe = (d) => isBlockedCell(headX + d.x, headY + d.y, wrap, occ, tailIdx) ? 1 : 0;
   out[2] = probe(fwd);
   out[3] = probe(left);
   out[4] = probe(right);
@@ -110,11 +171,44 @@ export function buildObservation(out, headX, headY, dirIndex, foodX, foodY, leng
     out[6] = 1; // no walls in wrap mode
   } else {
     let cx = headX, cy = headY;
-    while (!isOutside(cx + fwd.x, cy + fwd.y)) { free++; cx += fwd.x; cy += fwd.y; }
-    out[6] = 1 - free / span;
+    while (!isOutside(cx + fwd.x, cy + fwd.y) && !isBlockedCell(cx + fwd.x, cy + fwd.y, wrap, occ, tailIdx)) {
+      free++; cx += fwd.x; cy += fwd.y;
+    }
+    out[6] = 1 - Math.min(free, span) / span;
   }
 
   out[7] = length / CELL_COUNT;
+
+  // Corridor lookahead: contiguous open cells in each relative direction (up to 4).
+  const corridor = (d) => {
+    let n = 0, x = headX, y = headY;
+    for (let k = 0; k < 4; k++) {
+      x += d.x; y += d.y;
+      if (isBlockedCell(x, y, wrap, occ, tailIdx)) break;
+      n++;
+    }
+    return n / 4;
+  };
+  out[8]  = corridor(fwd);
+  out[9]  = corridor(left);
+  out[10] = corridor(right);
+
+  // Flood fill once and reuse its results for reachability + region liveness.
+  const region = floodRegion(occ, wrap, headX, headY, foodIdx, tailIdx);
+  out[11] = region.reachable ? 1 : 0;
+  out[12] = region.regionSize / CELL_COUNT;
+
+  if (tailIdx >= 0) {
+    const ty = (tailIdx / GRID_W) | 0, tx = tailIdx % GRID_W;
+    out[13] = (Math.abs(tx - headX) + Math.abs(ty - headY)) / span;
+  } else {
+    out[13] = 1; // no tail yet — farthest normalised distance
+  }
+  const safe = (d) => isBlockedCell(headX + d.x, headY + d.y, wrap, occ, tailIdx) ? 0 : 1;
+  out[14] = safe(fwd);      // tail-aware: moving into the vacating tail is allowed
+  out[15] = safe(left);
+  out[16] = safe(right);
+  out[17] = region.tailReachable ? 1 : 0;
   return out;
 }
 

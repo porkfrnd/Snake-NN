@@ -3,7 +3,7 @@
 import { Random } from '../utils/Random.js';
 import {
   fullDims, buildLayout, calculateParameterCount, normalizeHidden,
-  DEFAULT_HIDDEN, ARCH_LIMITS,
+  DEFAULT_HIDDEN, ARCH_LIMITS, INPUT_SIZE, OUTPUT_SIZE,
 } from './NetworkConfig.js';
 import { activate, initStd, isActivation, DEFAULT_ACTIVATION } from './ActivationFunctions.js';
 
@@ -149,13 +149,13 @@ export class NeuralNetwork {
     if (!Array.isArray(data.shape) || data.shape.length < 2 || data.shape.length > ARCH_LIMITS.maxHiddenLayers + 2) {
       throw new Error('Invalid shape');
     }
-    if (!Number.isInteger(data.shape[0]) || data.shape[0] !== 8) throw new Error('Input size must be 8');
+    if (!Number.isInteger(data.shape[0]) || data.shape[0] !== INPUT_SIZE) throw new Error(`Input size must be ${INPUT_SIZE}`);
     if (!Number.isInteger(data.shape[data.shape.length - 1]) || data.shape[data.shape.length - 1] !== 3) {
       throw new Error('Output size must be 3');
     }
     let dims;
     try {
-      dims = [8, ...normalizeHidden(data.shape.slice(1, -1)), 3];
+      dims = [INPUT_SIZE, ...normalizeHidden(data.shape.slice(1, -1)), OUTPUT_SIZE];
     } catch (err) { throw new Error(`Shape rejected: ${err.message}`); }
     const count = calculateParameterCount(dims).total;
     if (data.parameterCount !== undefined && data.parameterCount !== count) {

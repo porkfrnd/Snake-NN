@@ -26,7 +26,7 @@ main.js ──► UIManager ──► GameEngine ──► Snake / Food / GameRe
 ## The single-rules rule
 
 `game/GameRules.js` is the one authority for grid geometry, turn semantics,
-wrap behavior, food placement and the 8-input observation. It is imported by:
+wrap behavior, food placement and the 18-input observation. It is imported by:
 
 - `Snake` / `GameEngine` (human play),
 - `SnakeSimulation` (headless training),
@@ -73,10 +73,13 @@ steps (capped at `cfg.timeBudgetMax`), so the evaluation horizon grows as a
 curriculum: early generations favor greedy efficiency, later generations force
 space management as the snake's body lengthens.
 
-Fitness within that budget is `foods − steps · stepCost − (crash ? deathPenalty : 0)`,
-with `stepCost` chosen so `stepCost · timeBudgetMax < 1` (cannot outweigh an
-apple by stalling). Selection is otherwise unchanged (tournament k=4, elitism 10%,
-immigrants 3%, adaptive mutation).
+Fitness within that budget is
+`foods·APPLE − steps·STEP − (crash ? DEATH : starve ? STARVE : 0)` with
+`APPLE = 10`, `STEP = 0.004`, `DEATH = 20`, `STARVE = 5`. The invariants
+`STEP·timeBudgetMax < APPLE` (an apple beats a whole budget of cautious
+survival) and `DEATH > APPLE` (greedily dying for one more apple never pays)
+are enforced in tests. Selection is otherwise unchanged (tournament k=4,
+elitism 10%, immigrants 3%, adaptive mutation).
 
 The UI never requests per-generation permission; the loop runs until a human
 pauses or stops it.

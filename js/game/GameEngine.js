@@ -10,6 +10,7 @@ import { Food } from './Food.js';
 import { GameRenderer } from './GameRenderer.js';
 import { InputManager } from './InputManager.js';
 import { argmax } from '../utils/MathUtils.js';
+import { INPUT_SIZE as NET_INPUT_SIZE } from '../ai/NetworkConfig.js';
 
 export const GameState = Object.freeze({
   MENU: 'menu',
@@ -47,7 +48,7 @@ export class GameEngine {
     this.controller = null;   // { decide(obs)->action } during AI replay
     this.controllerMeta = null;
     this._occ = new Uint8Array(CELL_COUNT); // reusable occupancy mirror for observations
-    this._obs = new Float32Array(8);
+    this._obs = new Float32Array(NET_INPUT_SIZE);
 
     this._raf = 0;
     this._lastTs = 0;
@@ -257,10 +258,15 @@ export class GameEngine {
     const body = this.snake.body;
     for (let i = 0; i < body.length; i++) occ[body[i].y * GRID_W + body[i].x] = 1;
     const h = this.snake.head;
+    const tail = body[body.length - 1];
     return buildObservation(
       this._obs, h.x, h.y, this.snake.dirIndex,
       this.food.x, this.food.y, this.snake.length, this.wrap,
-      (x, y) => (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) ? 1 : occ[y * GRID_W + x] === 1,
+      {
+        occ,
+        tailIdx: tail ? tail.y * GRID_W + tail.x : -1,
+        foodIdx: this.food.y * GRID_W + this.food.x,
+      },
     );
   }
 

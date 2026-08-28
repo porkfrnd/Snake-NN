@@ -32,7 +32,7 @@ The evaluation horizon grows each generation as a curriculum:
 
 ## Typed arrays, reused buffers
 
-- Network parameters: one flat `Float32Array` per network (447 floats).
+- Network parameters: one flat `Float32Array` per network (607 floats by default).
 - Simulation state: `Uint8Array` occupancy grid + `Int16Array` ring-buffer body.
   Both allocated once per `FitnessEvaluator` and reused across every game and
   every generation — the hot loop performs **zero allocations**.

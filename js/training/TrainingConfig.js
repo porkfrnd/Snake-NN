@@ -24,12 +24,18 @@ export const TrainingConfig = Object.freeze({
   timeBudgetGrowth: 3,        // extra steps per generation
   timeBudgetMax: 1600,        // ceiling
 
-  // fitness = foods − steps·stepCost − (crash ? deathPenalty : 0)
-  // Invariant: stepCost·timeBudgetMax + deathPenalty < 1 → one apple always
-  // outscores ANY amount of stalling, and speed can never purchase an apple.
-  // (0.00025 · 1600 + 0.5 = 0.9)
-  fitnessStepCost: 0.00025,
-  deathPenalty: 0.5,
+  // fitness = foods·APPLE − steps·STEP − (crash ? DEATH : starve ? STARVE : 0)
+  // Apple value is large so a single apple dominates cautious stalling; the
+  // death penalty (> 1 apple's value) means surviving with fewer apples beats
+  // greedily grabbing an extra apple and dying — that is the whole point:
+  // it teaches steady, safe play instead of greedy suicide. STEP adds a real
+  // survival/efficiency gradient (not just apple-count milestones), so every
+  // generation of a game — not only when an apple is eaten — exerts selection
+  // pressure.
+  fitnessAppleValue: 10,
+  fitnessStepCost: 0.004,      // 0.004·timeBudgetMax = 6.4 → real survival gradient
+  deathPenalty: 20,            // crashing into wall/self costs ~2 apples
+  starvationPenalty: 5,        // dying of hunger costs half an apple
 
   // Champions are ranked on unseen seeds at this FIXED budget so scores stay
   // comparable while the training budget grows around them.
