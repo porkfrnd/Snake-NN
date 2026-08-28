@@ -75,6 +75,7 @@ export class TrainingPanel {
     click('trainImport', () => this._import());
     click('trainWatch', () => this._watch());
     click('graphReset', () => this.graph.reset());
+    click('trainResetSettings', () => this._resetSettings());
 
     this._$('intensitySelect')?.addEventListener('change', (e) => {
       this._post(MSG.SET_INTENSITY, { intensity: e.target.value });
@@ -322,6 +323,34 @@ export class TrainingPanel {
       boardSize: this.boardSize,
       appleCount: this.appleCount,
     };
+  }
+
+  /** Reset every mutable training tuning value to its original default,
+   *  leaving the network architecture and activation untouched. */
+  _resetSettings() {
+    this.mutationStrength = TrainingConfig.mutationStrength;
+    this.populationSize = TrainingConfig.populationSize;
+    this.boardSize = 20;
+    this.appleCount = 1;
+
+    this.storage.setMutationStrength(this.mutationStrength);
+    this.storage.setPopulationSize(this.populationSize);
+    this.storage.setBoardSize(this.boardSize);
+    this.storage.setAppleCount(this.appleCount);
+
+    if (this._$('mutationLevel')) this._$('mutationLevel').value = String(Math.round(this.mutationStrength * 100));
+    if (this._$('mutationLevelHint')) this._$('mutationLevelHint').textContent = `${Math.round(this.mutationStrength * 100)}%`;
+    if (this._$('populationSelect')) this._$('populationSelect').value = String(this.populationSize);
+    if (this._$('boardSizeSelect')) this._$('boardSizeSelect').value = String(this.boardSize);
+    if (this._$('appleCountSelect')) this._$('appleCountSelect').value = String(this.appleCount);
+
+    if (this.worker) {
+      this._post(MSG.SET_MUTATION, { strength: this.mutationStrength });
+      this._post(MSG.SET_POPULATION, { size: this.populationSize });
+      this._post(MSG.SET_BOARD, { size: this.boardSize });
+      this._post(MSG.SET_APPLES, { count: this.appleCount });
+    }
+    this._note('Training settings reset to defaults — network structure kept.');
   }
 
   _start() {

@@ -258,6 +258,33 @@ async function main() {
   }));
   console.log('V3 PERSISTED:', JSON.stringify(ctrlPersist));
 
+  // Reset settings -> controls return to defaults, storage cleared, arch kept.
+  const settingsBefore = await page.evaluate(() => ({
+    archRows: document.querySelectorAll('#archEditor .archrow').length,
+    activation: document.getElementById('activationSelect')?.value,
+  }));
+  await page.click('#tabTrain');
+  await new Promise((r) => setTimeout(r, 250));
+  await page.evaluate(() => document.getElementById('trainResetSettings')?.scrollIntoView({ block: 'center' }));
+  await new Promise((r) => setTimeout(r, 200));
+  await page.click('#trainResetSettings');
+  await new Promise((r) => setTimeout(r, 300));
+  const settingsReset = await page.evaluate(() => ({
+    mutation: document.getElementById('mutationLevel')?.value,
+    mutationHint: document.getElementById('mutationLevelHint')?.textContent,
+    population: document.getElementById('populationSelect')?.value,
+    board: document.getElementById('boardSizeSelect')?.value,
+    apples: document.getElementById('appleCountSelect')?.value,
+    mutStored: localStorage.getItem('snake.settings.mutation'),
+    popStored: localStorage.getItem('snake.settings.population'),
+    boardStored: localStorage.getItem('snake.settings.board'),
+    applesStored: localStorage.getItem('snake.settings.apples'),
+    archRowsAfter: document.querySelectorAll('#archEditor .archrow').length,
+    activationAfter: document.getElementById('activationSelect')?.value,
+    note: document.getElementById('trainNote').textContent,
+  }));
+  console.log('SETTINGS RESET:', JSON.stringify({ before: settingsBefore, after: settingsReset }));
+
   await page.click('#themeToggle'); // restore light for the final screenshot
   await page.screenshot({ path: shots + 'v_after_reload.png' });
 
