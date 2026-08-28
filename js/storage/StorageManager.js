@@ -58,4 +58,39 @@ export class StorageManager {
   // Base activation for new populations
   getDefaultActivation(fallback) { return this._get(STORAGE_KEYS.activation, fallback); }
   setDefaultActivation(name) { this._set(STORAGE_KEYS.activation, name); }
+
+  // Mutation strength σ (0..1) for new/current population
+  getMutationStrength(fallback) {
+    const v = parseFloat(this._get(STORAGE_KEYS.mutation, ''));
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : fallback;
+  }
+  setMutationStrength(v) { this._set(STORAGE_KEYS.mutation, String(Math.max(0, Math.min(1, v)))); }
+
+  // Population size override (undefined => use TrainingConfig default)
+  getPopulationSize() {
+    const v = parseInt(this._get(STORAGE_KEYS.population, ''), 10);
+    return Number.isFinite(v) && v >= 10 ? v : undefined;
+  }
+  setPopulationSize(v) { this._set(STORAGE_KEYS.population, String(v)); }
+
+  // Replay playback speed multiplier (1x..3x)
+  getReplaySpeed(fallback = 1) {
+    const v = parseFloat(this._get(STORAGE_KEYS.replaySpeed, ''));
+    return Number.isFinite(v) && v >= 1 && v <= 3 ? v : fallback;
+  }
+  setReplaySpeed(v) { this._set(STORAGE_KEYS.replaySpeed, String(v)); }
+
+  // Square board size (cells per side); undefined => default 20
+  getBoardSize(fallback = 20) {
+    const v = parseInt(this._get(STORAGE_KEYS.boardSize, ''), 10);
+    return Number.isFinite(v) && v >= 8 && v <= 40 ? v : fallback;
+  }
+  setBoardSize(v) { this._set(STORAGE_KEYS.boardSize, String(v)); }
+
+  // Simultaneous apples on the board; undefined => default 1
+  getAppleCount(fallback = 1) {
+    const v = parseInt(this._get(STORAGE_KEYS.appleCount, ''), 10);
+    return Number.isFinite(v) && v >= 1 && v <= 4 ? v : fallback;
+  }
+  setAppleCount(v) { this._set(STORAGE_KEYS.appleCount, String(v)); }
 }

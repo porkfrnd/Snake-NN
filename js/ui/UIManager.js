@@ -1,6 +1,7 @@
 'use strict';
 
 import { GameEngine, GameState } from '../game/GameEngine.js';
+import { setBoard } from '../game/GameRules.js';
 import { StorageManager } from '../storage/StorageManager.js';
 import { Sound } from '../game/Sound.js';
 import { fmt } from '../utils/MathUtils.js';
@@ -20,6 +21,8 @@ export class UIManager {
   _$(id) { return document.getElementById(id); }
 
   init() {
+    const sz = this.storage.getBoardSize(20);
+    setBoard(sz, sz);   // size Play's renderer/engine to the persisted board
     this.engine = new GameEngine({
       storage: this.storage,
       sound: this.sound,
@@ -52,6 +55,11 @@ export class UIManager {
     click('overRestartBtn', () => this.engine.restart());
     click('overMenuBtn', () => this._stopReplayAndMenu());
     click('replayStopBtn', () => this._stopReplayAndMenu());
+    this._$('replaySpeed')?.addEventListener('change', (e) => {
+      const mult = Number(e.target.value) || 1;
+      this.engine.setReplaySpeed(mult);
+      this.storage.setReplaySpeed(mult);
+    });
   }
 
   _bindSettings() {
@@ -143,6 +151,10 @@ export class UIManager {
       { decide: (obs) => { const out = net.forward(obs); let b = 0; for (let i = 1; i < out.length; i++) if (out[i] > out[b]) b = i; return b - 1; } },
       { fitness: meta.fitness, generation: meta.generation, activation: meta.activation },
     );
+    const speedSel = this._$('replaySpeed');
+    const mult = this.storage.getReplaySpeed(1);
+    if (speedSel) { speedSel.value = String(mult); this.engine.setReplaySpeed(mult); }
+    else this.engine.setReplaySpeed(1);
     this.engine.restart();
   }
 

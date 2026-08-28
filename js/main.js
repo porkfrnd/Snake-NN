@@ -28,6 +28,26 @@ function boot() {
     ui.sound.click();
   });
 
+  // Fullscreen toggles for the training graph and the game board.
+  const fs = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const toggle = () => {
+      if (!document.fullscreenElement) {
+        el.requestFullscreen?.().catch(() => {});
+      } else {
+        document.exitFullscreen?.().catch(() => {});
+      }
+    };
+    const btn = id === 'graphWrap' ? document.getElementById('graphFullscreen') : document.getElementById('boardFullscreen');
+    btn?.addEventListener('click', toggle);
+    el.addEventListener('fullscreenchange', () => {
+      if (btn) btn.textContent = document.fullscreenElement ? '✕ Exit' : '⛶';
+    });
+  };
+  fs('graphWrap');
+  fs('boardWrap');
+
   // Debug/inspection hook (intentional, documented in README).
   window.__snake = { ui, training };
 }

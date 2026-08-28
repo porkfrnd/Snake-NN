@@ -19,7 +19,9 @@ training at Normal intensity on a mid-range laptop:
 
 The evaluation horizon grows each generation as a curriculum:
 `cfg.timeBudgetStart + (generation−1) · cfg.timeBudgetGrowth`, capped at
-`cfg.timeBudgetMax` (default 150 → +3/generation → 1,600). This means:
+`cfg.timeBudgetMax` (default 150 → +1/generation → 1,600). This slower, more
+patient ramp (was +3) keeps early generations to a tight budget so the AI
+learns to eat fast before the horizon lengthens. This means:
 
 - **Throughput declines gradually** as the budget grows — games/sec scales roughly
   inversely with the current budget. At budget 1,600 the rate drops to ~100 games/sec.
@@ -35,7 +37,12 @@ The evaluation horizon grows each generation as a curriculum:
 - Network parameters: one flat `Float32Array` per network (607 floats by default).
 - Simulation state: `Uint8Array` occupancy grid + `Int16Array` ring-buffer body.
   Both allocated once per `FitnessEvaluator` and reused across every game and
-  every generation — the hot loop performs **zero allocations**.
+  every generation — the hot loop performs **zero allocations**. Buffer size
+  follows the current grid: because `GameRules`' `GRID_W`/`GRID_H`/`CELL_COUNT`
+  are now live bindings set by `setBoard(w,h)`, the engine, simulation, renderer
+  and food arrays are sized for the chosen board (12–30 cells per side).
+- Play-mode food uses the allocation-free `Foods` collection (typed-array
+  `xs`/`ys` slots) for nearest-food lookup at O(apples) per board.
 - `forward()` writes into three reusable scratch buffers (no per-call arrays).
 - A test (`snakeSimulation.test.js → "no per-step allocation"`) pins this
   contract by asserting buffer identity across 50 steps.

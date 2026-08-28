@@ -11,9 +11,21 @@
  * The network outputs relative turns, so instant reversal is impossible by construction.
  */
 
-export const GRID_W = 20;
-export const GRID_H = 20;
-export const CELL_COUNT = GRID_W * GRID_H;
+export let GRID_W = 20;
+export let GRID_H = 20;
+export let CELL_COUNT = GRID_W * GRID_H;
+
+/**
+ * Runtime board sizing. Because these are ESM live bindings, every module that
+ * imports GRID_W/GRID_H/CELL_COUNT sees the new geometry immediately. MUST be
+ * called before any engine / simulation / renderer is constructed (their
+ * typed-array buffers and viewBox are allocated with the then-current size).
+ */
+export function setBoard(w, h) {
+  GRID_W = Math.max(6, Math.min(60, Math.floor(w)));
+  GRID_H = Math.max(6, Math.min(60, Math.floor(h)));
+  CELL_COUNT = GRID_W * GRID_H;
+}
 
 export const INITIAL_SPEED_MS = 130;
 export const MIN_SPEED_MS = 48;

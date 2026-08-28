@@ -78,9 +78,10 @@ t('eating food grows the snake and increments foods', () => {
   s.reset();
   const before = s.length;
   // Force food right in front of the head.
-  s.occ[s.foodIdx] = 0;
-  s.foodIdx = (s.headY * GRID_W) + s.headX + 1;
-  s.occ[s.foodIdx] = 0;
+  const target = (s.headY * GRID_W) + s.headX + 1;
+  s.foodSet = [target];
+  s.occ[target] = 0;
+  s.foodIdx = target;
   const r = s.step(0);
   eq(r, 'ate');
   eq(s.length, before + 1);
@@ -165,6 +166,24 @@ t('typed-array state: no per-step allocation of the big buffers', () => {
   s.reset();
   for (let i = 0; i < 50; i++) { const r = s.step(0); if (r.dead) break; }
   ok(s.occ === occ && s.bx === bx && s.by === by, 'buffers reused across steps');
+});
+
+t('multi-apple: maintains N simultaneous foods and refills on eat', () => {
+  const s = new SnakeSimulation({ appleCount: 3 });
+  eq(s.foodSet.length, 3, 'three foods spawned');
+  ok(new Set(s.foodSet).size === 3, 'foods are distinct cells');
+  for (let i = 0; i < s.foodSet.length; i++) ok(s.occ[s.foodSet[i]] === 0, 'not on the snake');
+  // Force an apple in front of the head and eat it.
+  const target = (s.headY * GRID_W) + s.headX + 1;
+  s.occ[target] = 0;
+  s.foodSet.push(target);
+  s.foodSet = s.foodSet.filter((f, i, a) => a.indexOf(f) === i);
+  s.foodIdx = target;
+  const r = s.step(0);
+  eq(r, 'ate');
+  eq(s.foods, 1, 'ate exactly one');
+  ok(!s.foodSet.includes(target), 'eaten apple removed');
+  eq(s.foodSet.length, 3, 'refilled back to appleCount');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

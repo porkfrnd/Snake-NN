@@ -126,13 +126,16 @@ export class GameRenderer {
     }
   }
 
-  renderFood(food) {
+  renderFoods(foods) {
     const g = this.foodLayer;
     while (g.firstChild) g.removeChild(g.firstChild);
-    if (food.x < 0) return;
     const c = this.cell;
-    const cx = food.x * c + c / 2;
-    const cy = food.y * c + c / 2;
+    for (let i = 0; i < foods.filled; i++) this._drawFood(g, c, foods.xs[i], foods.ys[i]);
+  }
+
+  _drawFood(g, c, fx, fy) {
+    const cx = fx * c + c / 2;
+    const cy = fy * c + c / 2;
     const grp = document.createElementNS(NS, 'g');
 
     const body = document.createElementNS(NS, 'circle');

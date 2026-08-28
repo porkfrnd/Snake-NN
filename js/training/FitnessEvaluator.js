@@ -26,6 +26,7 @@ export class FitnessEvaluator {
       wrap: false,
       maxSteps: cfg.timeBudgetMax,
       maxStepsWithoutFood: cfg.maxStepsWithoutFood,
+      appleCount: cfg.appleCount ?? 1,
     });
   }
 
@@ -56,7 +57,11 @@ export class FitnessEvaluator {
     const crashed = reason === 'wall' || reason === 'self';
     const starved = reason === 'starve';
     const penalty = crashed ? c.deathPenalty : starved ? c.starvationPenalty : 0;
-    const fitness = sim.foods * c.fitnessAppleValue - sim.steps * c.fitnessStepCost - penalty;
+    // Thirst: a progressive hunger penalty that grows the longer the snake has
+    // gone without eating, so circling/looping (which resets no food timer but
+    // never approaches food) is steadily punished and the agent is pushed to eat.
+    const thirst = (sim.stepsSinceFood ?? 0) * c.fitnessThirstRate;
+    const fitness = sim.foods * c.fitnessAppleValue - sim.steps * c.fitnessStepCost - thirst - penalty;
     return { fitness, foods: sim.foods, steps: sim.steps, reason };
   }
 

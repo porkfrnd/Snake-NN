@@ -39,6 +39,11 @@ export class TrainingPanel {
       this.hidden = this._sanitizeHidden(savedHidden ?? TrainingConfig.defaultHidden);
     } catch { this.hidden = [...TrainingConfig.defaultHidden]; }
 
+    this.mutationStrength = this.storage.getMutationStrength(TrainingConfig.mutationStrength);
+    this.populationSize = this.storage.getPopulationSize() ?? TrainingConfig.populationSize;
+    this.boardSize = this.storage.getBoardSize(20);
+    this.appleCount = this.storage.getAppleCount(1);
+
     this.graph = new TrainingGraph(document.getElementById('trainGraph'), { limit: TrainingConfig.historyLimit });
     this.viz = new NetworkVisualizer(document.getElementById('netViz'));
 
@@ -74,6 +79,54 @@ export class TrainingPanel {
     this._$('intensitySelect')?.addEventListener('change', (e) => {
       this._post(MSG.SET_INTENSITY, { intensity: e.target.value });
     });
+
+    // Mutation level: live-adjust the Gaussian σ for the current + future runs.
+    const mut = this._$('mutationLevel');
+    if (mut) {
+      mut.value = String(Math.round(this.mutationStrength * 100));
+      this._$('mutationLevelHint').textContent = `${Math.round(this.mutationStrength * 100)}%`;
+      mut.addEventListener('input', (e) => {
+        const level = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+        this.mutationStrength = level / 100;
+        this.storage.setMutationStrength(this.mutationStrength);
+        this._$('mutationLevelHint').textContent = `${level}%`;
+        if (this.worker) this._post(MSG.SET_MUTATION, { strength: this.mutationStrength });
+      });
+    }
+
+    // Population size: applied on the next Start / Reset (fresh population).
+    const pop = this._$('populationSelect');
+    if (pop) {
+      pop.value = String(Number.isFinite(this.populationSize) ? this.populationSize : 150);
+      pop.addEventListener('change', (e) => {
+        this.populationSize = Number(e.target.value) || 150;
+        this.storage.setPopulationSize(this.populationSize);
+        this._post(MSG.SET_POPULATION, { size: this.populationSize });
+      });
+    }
+
+    // Board size: world geometry — applied on Start/Reset AND immediately if the
+    // worker is already live (rebuild the population against the new board).
+    const board = this._$('boardSizeSelect');
+    if (board) {
+      board.value = String(this.boardSize);
+      board.addEventListener('change', (e) => {
+        this.boardSize = Number(e.target.value) || 20;
+        this.storage.setBoardSize(this.boardSize);
+        this._post(MSG.SET_BOARD, { size: this.boardSize });
+      });
+    }
+
+    // Apple count: simultaneous foods — same apply-on-change semantics.
+    const apples = this._$('appleCountSelect');
+    if (apples) {
+      apples.value = String(this.appleCount);
+      apples.addEventListener('change', (e) => {
+        this.appleCount = Number(e.target.value) || 1;
+        this.storage.setAppleCount(this.appleCount);
+        this._post(MSG.SET_APPLES, { count: this.appleCount });
+      });
+    }
 
     // Activation picker: converts the live population (weights preserved)
     // and becomes the base identity for fresh runs/immigrants.
@@ -261,7 +314,14 @@ export class TrainingPanel {
   }
 
   _arch() {
-    return { hidden: this.hidden.slice(), activation: this.activation };
+    return {
+      hidden: this.hidden.slice(),
+      activation: this.activation,
+      mutationStrength: this.mutationStrength,
+      populationSize: this.populationSize,
+      boardSize: this.boardSize,
+      appleCount: this.appleCount,
+    };
   }
 
   _start() {

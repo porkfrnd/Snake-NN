@@ -60,8 +60,19 @@
   margin-bottom: 6px;
 }
 .graphwrap header h3 { font-size: 13px; font-weight: 600; color: var(--muted); }
+.graphwrap header .hdract { display: flex; gap: 6px; }
 .graphwrap button { padding: 3px 10px; font-size: 12px; }
 #trainGraph { display: block; width: 100%; height: auto; }
+
+/* Fullscreen graph: fill the viewport, let the SVG scale up */
+.graphwrap:fullscreen {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  overflow: auto;
+}
+.graphwrap:fullscreen #trainGraph { flex: 1; width: 100%; height: auto; min-height: 70vh; }
 
 .inspectorwrap {
   background: var(--panel);

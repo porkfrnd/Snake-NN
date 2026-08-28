@@ -44,6 +44,17 @@
 
     <div class="replay-chip" id="replayChip" hidden>
       <span>AI replay — <b id="replayMeta"></b></span>
+      <label class="replay-speed">Speed
+        <select id="replaySpeed" aria-label="Replay speed">
+          <option value="1">1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="1.75">1.75x</option>
+          <option value="2">2x</option>
+          <option value="2.5">2.5x</option>
+          <option value="3">3x</option>
+        </select>
+      </label>
       <button id="replayStopBtn" type="button">Stop replay</button>
     </div>
 
@@ -55,6 +66,7 @@
         <g id="snakeLayer"></g>
         <g id="fxLayer" pointer-events="none"></g>
       </svg>
+      <button id="boardFullscreen" class="fsbtn" type="button" aria-label="Toggle fullscreen board">⛶</button>
 
       <div class="overlay open" id="menuOverlay" role="dialog" aria-modal="true" aria-label="Start menu">
         <div class="panel">
@@ -184,10 +196,13 @@
       <div class="cell wide"><label>Activation mix</label><b id="statActivations">—</b></div>
     </div>
 
-    <div class="graphwrap">
+    <div class="graphwrap" id="graphWrap">
       <header>
         <h3>Fitness per generation</h3>
-        <button id="graphReset" type="button">Reset graph</button>
+        <span class="hdract">
+          <button id="graphFullscreen" type="button">⛶ Fullscreen</button>
+          <button id="graphReset" type="button">Reset graph</button>
+        </span>
       </header>
       <svg id="trainGraph" viewBox="0 0 640 180" role="img" aria-label="Fitness history chart"></svg>
     </div>
@@ -238,6 +253,52 @@
             <option value="max">Maximum</option>
           </select>
         </label>
+      </div>
+
+      <div class="settingblock">
+        <label>Mutation level
+          <input type="range" id="mutationLevel" min="0" max="100" step="1" aria-label="Mutation strength"
+                 style="width:140px; accent-color: var(--accent)">
+        </label>
+        <p class="hint" id="mutationLevelHint">55%</p>
+      </div>
+
+      <div class="settingblock">
+        <label>Population
+          <select id="populationSelect" aria-label="Population size">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="150" selected>150</option>
+            <option value="250">250</option>
+            <option value="400">400</option>
+          </select>
+        </label>
+        <p class="hint">Larger = slower per generation, but generally learns more reliably.</p>
+      </div>
+
+      <div class="settingblock">
+        <label>Board size
+          <select id="boardSizeSelect" aria-label="Board size (cells per side)">
+            <option value="12">12 × 12</option>
+            <option value="16">16 × 16</option>
+            <option value="20" selected>20 × 20</option>
+            <option value="24">24 × 24</option>
+            <option value="30">30 × 30</option>
+          </select>
+        </label>
+        <p class="hint">Applied on the next Start / Reset. Bigger boards are harder.</p>
+      </div>
+
+      <div class="settingblock">
+        <label>Apples at once
+          <select id="appleCountSelect" aria-label="Simultaneous apples">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <p class="hint">More apples shorten the average search — helps it eat faster.</p>
       </div>
 
       <label class="bgline">

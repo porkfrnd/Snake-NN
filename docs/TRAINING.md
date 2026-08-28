@@ -26,10 +26,12 @@ continuously once started — the UI never asks per-generation permission.
 ## Fitness
 
 ```
-fitness = foods·APPLE − steps·STEP − (crash ? DEATH : starve ? STARVE : 0)
+fitness = foods·APPLE − steps·STEP − THIRST·stepsSinceFood
+          − (crash ? DEATH : starve ? STARVE : 0)
 ```
 
-Default constants: `APPLE = 10`, `STEP = 0.004`, `DEATH = 20`, `STARVE = 5`.
+Default constants: `APPLE = 10`, `STEP = 0.004`, `DEATH = 20`, `STARVE = 12`,
+`THIRST = 0.05`.
 
 Design intent:
 
@@ -43,12 +45,19 @@ Design intent:
   outranks one that grabs a greedy 6th apple and dies (60 − 20 − steps·STEP).
   This defuses the trap that made the old AI "feel off": it no longer learns
   to dive into its own tail chasing one more apple.
-- **No coasting.** Starvation costs `STARVE = 5`, so a snake that stops moving
-  toward food is penalized ~half an apple (the 120-step starve cap also frees
-  compute by aborting hopeless games).
-- **Short horizon first, then long.** The budget starts at 150 steps and grows
-  3 steps each generation (max 1,600), so early generations select for greedy
-  efficiency and later ones force space management as the body lengthens.
+- **No coasting — get to the apple.** Starvation costs `STARVE = 12` (> one
+  apple), so a snake that stops moving toward food is punished *harder* than
+  the value of one apple — there is always net incentive to keep eating.
+- **Circling is punished progressively.** The `THIRST` term subtracts
+  `0.05 · stepsSinceFood` every tick, so a snake that loops in a circle
+  without eating bleeds fitness the whole time (0.05 · 120 ≈ 6 near the starve
+  cap). This directly attacks the "circled itself in, got stuck" failure mode:
+  wandering is steadily penalized even before it starves.
+- **Short horizon first, then a long, patient ramp.** The budget starts at 150
+  steps and grows only **1** step per generation (max 1,600), so early
+  generations spend many games forced to eat fast in a tight budget — selecting
+  for quick, efficient eating before the budget relaxes into long-horizon space
+  management.
 - **Tie-breaking.** Among equal-apple games, fewer steps used wins (the
   −0.004/step term), and the budget ceiling caps how long anyone can stall.
 
@@ -61,6 +70,10 @@ Termination reasons: `wall`, `self`, `starve`, `cap`, `win` (board full).
   Defaults: 0.004 · 1600 = 6.4 < 10. ✓
 - `DEATH > APPLE` → one crash costs more than one apple, so risking your life
   for a single extra apple is never profitable. Defaults: 20 > 10. ✓
+- `STARVE > APPLE` → starving a run is worse than earning one more apple, so a
+  snake is always pushed to keep eating. Defaults: 12 > 10. ✓
+- The `THIRST` term makes a foodless snake score sharply negative the longer it
+  starves (0.05 · 120 + 12 ≈ 18 below par), so circling/coasting can never win.
 - A surviving (non-crashing) snake of equal apples always outscores a crashing
   one; a foodless starver scores negative and can never become champion.
 

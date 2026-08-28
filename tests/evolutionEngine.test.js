@@ -183,6 +183,7 @@ function makeScriptedSim(period, { deathReason = 'cap', dieAfter = Infinity } = 
       return this;
     }
     observation() { return new Float32Array(18); }
+    get stepsSinceFood() { return this._sinceFood; }
     step() {
       if (this._sinceFood >= this.maxStepsWithoutFood) return { dead: 'starve' };
       if (this.steps >= this.maxSteps) return { dead: deathReason };
@@ -235,7 +236,7 @@ t('reward: death penalty exceeds one apple — greedy-then-die never wins', () =
   // −deathPenalty fitness — never a good deal. Surviving a +1 apple slower is
   // always preferred over grabbing it and dying.
   ok(c.deathPenalty > c.fitnessAppleValue, 'a crash costs more than one apple');
-  ok(c.starvationPenalty < c.fitnessAppleValue, 'starvation is real but cheaper than surviving-an-extra-apple');
+  ok(c.starvationPenalty > c.fitnessAppleValue, 'starving is punished MORE than one apple — it must keep eating');
 });
 
 t('reward: an apple is worth more than a whole budget of cautious survival', () => {

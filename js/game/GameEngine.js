@@ -6,7 +6,7 @@ import {
   buildObservation, dirIndexFromVector,
 } from './GameRules.js';
 import { Snake } from './Snake.js';
-import { Food } from './Food.js';
+import { Foods } from './Food.js';
 import { GameRenderer } from './GameRenderer.js';
 import { InputManager } from './InputManager.js';
 import { argmax } from '../utils/MathUtils.js';
@@ -35,11 +35,13 @@ export class GameEngine {
     this.state = GameState.MENU;
     this.wrap = storage.getWrap();
     this.snake = new Snake(this.wrap);
-    this.food = new Food();
+    this.appleCount = storage.getAppleCount(1);
+    this.foods = new Foods(Math.random, this.appleCount);
     this.renderer = new GameRenderer({ gridLayer: 'gridLayer', foodLayer: 'foodLayer', snakeLayer: 'snakeLayer', fxLayer: 'fxLayer' });
     this.renderer.buildGrid();
 
     this.speedMs = INITIAL_SPEED_MS;
+    this.speedMul = 1;        // replay speed multiplier (1x..3x), engine ticks faster
     this.score = 0;
     this.level = 1;
     this.foodsEaten = 0;
@@ -102,15 +104,21 @@ export class GameEngine {
   detachController() {
     this.controller = null;
     this.controllerMeta = null;
+    this.speedMul = 1;
     if (this.state === GameState.PLAYING || this.state === GameState.PAUSED) this.goMenu();
     this.cb.onHUD(this._hud());
+  }
+
+  /** Replay speed multiplier (1x..3x). Engine ticks proportionally faster. */
+  setReplaySpeed(mult) {
+    this.speedMul = Math.max(1, Math.min(4, Number(mult) || 1));
   }
 
   start() {
     if (this.state === GameState.COUNTDOWN) return;
     this._stopLoop();
     this.snake = new Snake(this.wrap);
-    this.food.respawn((x, y) => !this._cellOccupied(x, y));
+    this.foods.respawnAll((x, y) => !this._cellOccupied(x, y));
     this.score = 0;
     this.level = 1;
     this.foodsEaten = 0;
@@ -143,7 +151,7 @@ export class GameEngine {
     this._stopLoop();
     clearTimeout(this._countTimer);
     this.snake = new Snake(this.wrap);
-    this.food.respawn((x, y) => !this._cellOccupied(x, y));
+    this.foods.respawnAll((x, y) => !this._cellOccupied(x, y));
     this.score = 0;
     this.level = 1;
     this.speedMs = INITIAL_SPEED_MS;
@@ -209,11 +217,12 @@ export class GameEngine {
     this._lastTs = ts;
 
     let steps = 0;
-    while (this._acc >= this.speedMs && steps < 4) {
+    const stepMs = this.speedMs / Math.max(0.1, this.speedMul);
+    while (this._acc >= stepMs && steps < 8) {
       this._tick();
       steps++;
       if (this.state !== GameState.PLAYING) return;
-      this._acc -= this.speedMs;
+      this._acc -= stepMs;
     }
     this._render();
     this._raf = requestAnimationFrame(this._loop);
@@ -227,9 +236,8 @@ export class GameEngine {
       this.snake.queueAction(Number.isFinite(action) ? Math.sign(action) : 0);
     }
 
-    const fx = this.food.x, fy = this.food.y;
     const result = this.snake.step(
-      (x, y) => x === fx && y === fy,
+      (x, y) => this.foods.has(x, y),
       (x, y) => this._cellOccupied(x, y),
     );
 
@@ -240,7 +248,8 @@ export class GameEngine {
       this.score += SCORE_PER_FOOD;
       this.level = Math.floor(this.score / LEVEL_EVERY) + 1;
       this.speedMs = Math.max(MIN_SPEED_MS, this.speedMs - SPEED_STEP_MS);
-      if (!this.food.respawn((x, y) => !this._cellOccupied(x, y))) {
+      this.foods.remove(this.snake.head.x, this.snake.head.y);
+      if (!this.foods.respawnOne((x, y) => !this._cellOccupied(x, y))) {
         this._gameOver('win'); // board full — perfect game
         return;
       }
@@ -259,13 +268,14 @@ export class GameEngine {
     for (let i = 0; i < body.length; i++) occ[body[i].y * GRID_W + body[i].x] = 1;
     const h = this.snake.head;
     const tail = body[body.length - 1];
+    const nf = this.foods.nearest(h.x, h.y);
     return buildObservation(
       this._obs, h.x, h.y, this.snake.dirIndex,
-      this.food.x, this.food.y, this.snake.length, this.wrap,
+      nf.x, nf.y, this.snake.length, this.wrap,
       {
         occ,
         tailIdx: tail ? tail.y * GRID_W + tail.x : -1,
-        foodIdx: this.food.y * GRID_W + this.food.x,
+        foodIdx: nf.x < 0 ? -1 : nf.y * GRID_W + nf.x,
       },
     );
   }
@@ -293,6 +303,6 @@ export class GameEngine {
 
   _render() {
     this.renderer.renderSnake(this.snake.body, this.snake.dirIndex, this.wrap);
-    this.renderer.renderFood(this.food);
+    this.renderer.renderFoods(this.foods);
   }
 }

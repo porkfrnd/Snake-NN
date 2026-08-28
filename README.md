@@ -78,6 +78,40 @@ Switch to the **Train** tab and press **Start**.
 | Watch champion | Replay in Play mode |
 | Intensity | Low / Normal / High / Maximum — changes real batch size + yield |
 | Continue in background | Opt in to training while the tab is hidden |
+| Mutation level | 0–100 slider (default 55, maps to Gaussian σ default 0.35) |
+| Population | Select 50 / 100 / **150** (default) / 250 / 400 |
+| Board size | Select 12 / 16 / **20** (default) / 24 / 30 cells per side |
+| Apples at once | Select **1** (default) / 2 / 3 / 4 simultaneous foods |
+
+**Champion replay speed** is selectable (1×, 1.25×, 1.5×, 1.75×, 2×, 2.5×, 3×) and
+scales the tick rate proportionally via `GameEngine.setReplaySpeed()`.
+
+**Fullscreen buttons**: a ⛶ button in the training graph header (fullscreens the
+graph area) and a floating ⛶ button over the game board (fullscreens the board),
+both using the browser Fullscreen API.
+
+### Training controls
+
+Four simulation-level controls are persisted to `localStorage` and sent to the
+training worker to rebuild the run:
+
+| Control | Options / default | Persisted under | Worker message |
+|---|---|---|---|
+| Mutation level | 0–100 slider, default **55** (maps to Gaussian σ 0.35, `cfg.mutationStrength`) | `snake.settings.mutation` | `SET_MUTATION {strength}` |
+| Population | 50 / 100 / **150** / 250 / 400 | `snake.settings.population` | `SET_POPULATION {size}` |
+| Board size | 12 / 16 / **20** / 24 / 30 (cells per side, square) | `snake.settings.board` | `SET_BOARD {size}` |
+| Apples at once | **1** / 2 / 3 / 4 | `snake.settings.apples` | `SET_APPLES {count}` |
+
+- **Mutation level** sets the live Gaussian σ on `engine.mutationStrength` and
+  `cfg.mutationStrength` (the stored value is parsed to 0–1).
+- **Population** updates `cfg.populationSize` and rebuilds the population.
+- **Board size** applies a square board of the chosen cells-per-side via
+  `setBoard(w,h)` in `js/game/GameRules.js`. Because `setBoard` reallocates the
+  engine/simulation/renderer buffers, it runs **before** any of them are built.
+- **Apples at once** sets `cfg.appleCount` and rebuilds. Multi-apple is supported
+  in **both** headless training (`SnakeSimulation` keeps a `foodSet` array and
+  its 18-input observation targets the *nearest* food) and Play mode (`Foods`
+  collection manager), so Play mode follows the persisted `appleCount` too.
 
 ### Performance notes
 
@@ -105,13 +139,13 @@ All tuning constants live in two files:
 Plain-assertion test scripts — no test framework:
 
 ```bash
-npm test          # runs all three suites
+npm test          # runs all three suites — 52 assertions passing
 # or individually:
-node tests/neuralNetwork.test.js     # 12 assertions: params, forward, mutation,
+node tests/neuralNetwork.test.js     # 17 assertions: params, forward, mutation,
                                      # clone, serialize round-trip, NaN repair
-node tests/snakeSimulation.test.js   # 14 assertions: movement, collision, food,
+node tests/snakeSimulation.test.js   # 15 assertions: movement, collision, food,
                                      # wrap, tail-vacate, caps, observations
-node tests/evolutionEngine.test.js   # 10 assertions: elitism, selection,
+node tests/evolutionEngine.test.js   # 20 assertions: elitism, selection,
                                      # champion protection, stagnation, seeding
 ```
 

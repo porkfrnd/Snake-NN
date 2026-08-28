@@ -184,6 +184,80 @@ async function main() {
     activation: document.getElementById('activationSelect').value,
   }));
   console.log('PERSISTED AFTER RELOAD:', JSON.stringify(persisted));
+
+  // --- v3: mutation / population / fullscreen controls present + responsive ---
+  await page.click('#tabTrain');
+  await new Promise((r) => setTimeout(r, 300));
+  const ctrl = await page.evaluate(() => {
+    const mut = document.getElementById('mutationLevel');
+    const mutVal = (mut) ? {
+      min: mut.min, max: mut.max, value: mut.value,
+      hint: document.getElementById('mutationLevelHint')?.textContent,
+    } : null;
+    const pop = document.getElementById('populationSelect');
+    const popVal = pop ? pop.value : null;
+    const fsbtns = ['graphFullscreen', 'boardFullscreen'].map((id) => !!document.getElementById(id));
+    return { mutVal, popVal, fullscreenButtons: fsbtns };
+  });
+  console.log('V3 CONTROLS:', JSON.stringify(ctrl));
+
+  // Move the mutation slider -> hint + shadow value update (no worker yet).
+  const mutAfter = await page.evaluate(() => {
+    const mut = document.getElementById('mutationLevel');
+    if (!mut) return null;
+    mut.value = '70';
+    mut.dispatchEvent(new Event('input', { bubbles: true }));
+    return {
+      value: mut.value,
+      hint: document.getElementById('mutationLevelHint')?.textContent,
+      stored: localStorage.getItem('snake.settings.mutation'),
+    };
+  });
+  console.log('MUTATION INPUT:', JSON.stringify(mutAfter));
+
+  // Population change -> select value + storage.
+  const popAfter = await page.evaluate(() => {
+    const pop = document.getElementById('populationSelect');
+    if (!pop) return null;
+    pop.value = '250';
+    pop.dispatchEvent(new Event('change', { bubbles: true }));
+    return { value: pop.value, stored: localStorage.getItem('snake.settings.population') };
+  });
+  console.log('POPULATION INPUT:', JSON.stringify(popAfter));
+
+  // Board + apple controls present, and changing them persists.
+  const world = await page.evaluate(() => ({
+    board: document.getElementById('boardSizeSelect')?.value,
+    apples: document.getElementById('appleCountSelect')?.value,
+  }));
+  console.log('WORLD CONTROLS:', JSON.stringify(world));
+
+  const worldAfter = await page.evaluate(() => {
+    const b = document.getElementById('boardSizeSelect');
+    const a = document.getElementById('appleCountSelect');
+    if (b) { b.value = '24'; b.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (a) { a.value = '2'; a.dispatchEvent(new Event('change', { bubbles: true })); }
+    return {
+      board: b ? b.value : null,
+      apples: a ? a.value : null,
+      boardStored: localStorage.getItem('snake.settings.board'),
+      applesStored: localStorage.getItem('snake.settings.apples'),
+    };
+  });
+  console.log('WORLD INPUT:', JSON.stringify(worldAfter));
+
+  // Reload -> mutation + population + board/apples persist for the next run.
+  await page.reload({ waitUntil: 'networkidle0' });
+  await new Promise((r) => setTimeout(r, 400));
+  const ctrlPersist = await page.evaluate(() => ({
+    mutation: document.getElementById('mutationLevel')?.value,
+    mutationHint: document.getElementById('mutationLevelHint')?.textContent,
+    population: document.getElementById('populationSelect')?.value,
+    board: document.getElementById('boardSizeSelect')?.value,
+    apples: document.getElementById('appleCountSelect')?.value,
+  }));
+  console.log('V3 PERSISTED:', JSON.stringify(ctrlPersist));
+
   await page.click('#themeToggle'); // restore light for the final screenshot
   await page.screenshot({ path: shots + 'v_after_reload.png' });
 
